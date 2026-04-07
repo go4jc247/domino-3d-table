@@ -276,6 +276,7 @@ function createDomino(leftVal, rightVal) {
 
   // 2. Pip holes — dark cylinders inset into the ivory surface
   const holeGeo = new THREE.CylinderGeometry(PIP_R, PIP_R, HOLE_DEPTH, 24);
+  holeGeo.rotateX(Math.PI / 2);
   const holeMat = new THREE.MeshPhongMaterial({ color: 0x0a0a0a });
 
   // 3. Colored concave pads — sit inside the holes, visible from above
@@ -302,35 +303,21 @@ function createDomino(leftVal, rightVal) {
   addPips(leftVal, -DOM_L/4);
   addPips(rightVal, DOM_L/4);
 
-  // 4. Pill-shaped center groove (like hull of two cylinders in OpenSCAD)
-  const grooveGroup = new THREE.Group();
-  // Main groove channel — dark recessed area
-  const groovePath = new THREE.Shape();
+  // 4. Pill-shaped center groove running across width (along Y) at x=0
   const gr = GROOVE_W / 2;
   const gl = GROOVE_LEN / 2;
-  groovePath.moveTo(-gl, -gr);
-  groovePath.lineTo(gl, -gr);
-  groovePath.arc(0, gr, gr, -Math.PI/2, Math.PI/2);
-  groovePath.lineTo(-gl, gr);
-  groovePath.arc(0, -gr, gr, Math.PI/2, -Math.PI/2);
+  const groovePath = new THREE.Shape();
+  groovePath.moveTo(-gr, -gl);
+  groovePath.lineTo(-gr, gl);
+  groovePath.arc(gr, 0, gr, Math.PI, 0, true);
+  groovePath.lineTo(gr, -gl);
+  groovePath.arc(-gr, 0, gr, 0, Math.PI, true);
   const grooveExtGeo = new THREE.ExtrudeGeometry(groovePath, {
     depth: HOLE_DEPTH, bevelEnabled: false
   });
-  grooveExtGeo.rotateX(Math.PI/2);
   const grooveMesh = new THREE.Mesh(grooveExtGeo, blackMat);
-  grooveMesh.position.set(0, gl, topZ - HOLE_DEPTH + 0.05);
-  grooveMesh.rotation.z = Math.PI/2;
-  grooveGroup.add(grooveMesh);
-
-  // Groove concave surface — dark depression on top
-  const grooveSurfR = (gr*gr + GROOVE_DEPTH*GROOVE_DEPTH) / (2*GROOVE_DEPTH);
-  const grooveSurfGeo = new THREE.CylinderGeometry(gr - 0.1, gr - 0.1, GROOVE_LEN, 24, 1, true);
-  const grooveSurf = new THREE.Mesh(grooveSurfGeo, blackMat);
-  grooveSurf.position.set(0, 0, topZ - 0.3);
-  grooveSurf.rotation.x = Math.PI/2;
-  grooveGroup.add(grooveSurf);
-
-  group.add(grooveGroup);
+  grooveMesh.position.z = topZ - HOLE_DEPTH + 0.05;
+  group.add(grooveMesh);
 
   return group;
 }
