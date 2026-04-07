@@ -13,48 +13,56 @@
   </style>
 </head>
 <body>
-<div id="info">Click to enable FPS controls | WASD: move | Space/Ctrl: up/down | Shift: sprint | Mouse: look | Scroll: speed | ESC: release</div>
+<div id="info">Click to walk around | WASD: walk | Mouse: look | Shift: run | ESC: release</div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 <script>
 // ========== SCENE SETUP ==========
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1a2e);
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 8000);
-camera.position.set(0, -1800, 1200);
-camera.lookAt(0, 0, 45);
+// Eye height: floor is at -700, standing person ~1700mm tall, eyes at ~1600
+const FLOOR_Z = -700;
+const EYE_HEIGHT = 1600;
+const CAM_Z = FLOOR_Z + EYE_HEIGHT;
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 8000);
+camera.position.set(0, -1800, CAM_Z);
+camera.up.set(0, 0, 1); // Z is up in this scene
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// ========== FPS CONTROLS ==========
-const controls = new THREE.PointerLockControls(camera, document.body);
+// ========== FPS GROUND-LOCKED CONTROLS ==========
 const crosshair = document.getElementById('crosshair');
+let isLocked = false;
+let yaw = Math.PI / 2;   // horizontal angle (start facing +Y toward table)
+let pitch = -0.4;         // vertical angle (slightly looking down at table)
+const PITCH_MAX = Math.PI / 2 - 0.05;
 
-// Click to lock pointer
+// Pointer lock
 document.body.addEventListener('click', () => {
-  if (!controls.isLocked) controls.lock();
+  if (!isLocked) renderer.domElement.requestPointerLock();
 });
-controls.addEventListener('lock', () => { crosshair.style.display = 'block'; });
-controls.addEventListener('unlock', () => { crosshair.style.display = 'none'; });
+document.addEventListener('pointerlockchange', () => {
+  isLocked = document.pointerLockElement === renderer.domElement;
+  crosshair.style.display = isLocked ? 'block' : 'none';
+});
+
+// Mouse look
+document.addEventListener('mousemove', (e) => {
+  if (!isLocked) return;
+  yaw   -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, pitch));
+});
 
 // Movement state
-const moveState = { forward: false, backward: false, left: false, right: false, up: false, down: false, sprint: false };
-let moveSpeed = 800;
-const velocity = new THREE.Vector3();
-const direction = new THREE.Vector3();
-let clock = new THREE.Clock();
-
-// Scroll to adjust base speed
-window.addEventListener('wheel', (e) => {
-  if (!controls.isLocked) return;
-  moveSpeed = Math.max(100, Math.min(3000, moveSpeed - e.deltaY * 0.5));
-  e.preventDefault();
-}, { passive: false });
+const moveState = { forward: false, backward: false, left: false, right: false, sprint: false };
+const walkSpeed = 600;
+const clock = new THREE.Clock();
 
 window.addEventListener('keydown', (e) => {
   switch (e.code) {
@@ -62,8 +70,6 @@ window.addEventListener('keydown', (e) => {
     case 'KeyS': case 'ArrowDown':  moveState.backward = true; break;
     case 'KeyA': case 'ArrowLeft':  moveState.left = true; break;
     case 'KeyD': case 'ArrowRight': moveState.right = true; break;
-    case 'Space':    moveState.up = true; e.preventDefault(); break;
-    case 'ControlLeft': case 'ControlRight': moveState.down = true; break;
     case 'ShiftLeft': case 'ShiftRight': moveState.sprint = true; break;
   }
 });
@@ -73,8 +79,6 @@ window.addEventListener('keyup', (e) => {
     case 'KeyS': case 'ArrowDown':  moveState.backward = false; break;
     case 'KeyA': case 'ArrowLeft':  moveState.left = false; break;
     case 'KeyD': case 'ArrowRight': moveState.right = false; break;
-    case 'Space':    moveState.up = false; break;
-    case 'ControlLeft': case 'ControlRight': moveState.down = false; break;
     case 'ShiftLeft': case 'ShiftRight': moveState.sprint = false; break;
   }
 });
@@ -438,21 +442,42 @@ function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
 
-  if (controls.isLocked) {
-    const speed = moveSpeed * (moveState.sprint ? 2.5 : 1) * delta;
+  if (isLocked) {
+    const speed = walkSpeed * (moveState.sprint ? 2.5 : 1) * delta;
 
-    // Forward/backward and left/right
-    direction.z = Number(moveState.forward) - Number(moveState.backward);
-    direction.x = Number(moveState.right) - Number(moveState.left);
-    direction.normalize();
+    // Forward direction on ground plane (XY only, ignore pitch)
+    const fwdX = Math.cos(yaw);
+    const fwdY = Math.sin(yaw);
+    // Right direction (perpendicular on ground)
+    const rightX = Math.cos(yaw - Math.PI / 2);
+    const rightY = Math.sin(yaw - Math.PI / 2);
 
-    if (moveState.forward || moveState.backward) controls.moveForward(direction.z * speed);
-    if (moveState.left || moveState.right) controls.moveRight(direction.x * speed);
+    let moveX = 0, moveY = 0;
+    if (moveState.forward)  { moveX += fwdX; moveY += fwdY; }
+    if (moveState.backward) { moveX -= fwdX; moveY -= fwdY; }
+    if (moveState.left)     { moveX -= rightX; moveY -= rightY; }
+    if (moveState.right)    { moveX += rightX; moveY += rightY; }
 
-    // Up/down (world Y in Three.js, but we use Z-up so move camera.position.z)
-    if (moveState.up) camera.position.z += speed;
-    if (moveState.down) camera.position.z -= speed;
+    // Normalize diagonal movement
+    const len = Math.sqrt(moveX * moveX + moveY * moveY);
+    if (len > 0) {
+      camera.position.x += (moveX / len) * speed;
+      camera.position.y += (moveY / len) * speed;
+    }
+
+    // Camera always at eye height (locked to ground)
+    camera.position.z = CAM_Z;
   }
+
+  // Update camera look direction from yaw/pitch
+  const lookX = Math.cos(pitch) * Math.cos(yaw);
+  const lookY = Math.cos(pitch) * Math.sin(yaw);
+  const lookZ = Math.sin(pitch);
+  camera.lookAt(
+    camera.position.x + lookX,
+    camera.position.y + lookY,
+    camera.position.z + lookZ
+  );
 
   renderer.render(scene, camera);
 }
