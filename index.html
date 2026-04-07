@@ -324,7 +324,7 @@ for (let seat = 0; seat < 6; seat++) {
     rackDist * Math.sin(angle),
     TOP_THICKNESS
   );
-  rackGroup.rotation.z = angle + Math.PI;
+  rackGroup.rotation.z = angle + Math.PI - Math.PI / 2;
   scene.add(rackGroup);
 }
 
