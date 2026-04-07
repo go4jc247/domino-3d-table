@@ -13,9 +13,10 @@
   </style>
 </head>
 <body>
-<div id="info">Left-drag: rotate | Right-drag: pan | Scroll: zoom</div>
+<div id="info">Click to enable FPS controls | WASD: move | Space/Ctrl: up/down | Shift: sprint | Mouse: look | Scroll: speed | ESC: release</div>
+<div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 <script>
 // ========== SCENE SETUP ==========
 const scene = new THREE.Scene();
@@ -30,14 +31,53 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// ========== ORBIT CONTROLS ==========
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0, 45);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.minDistance = 400;
-controls.maxDistance = 5000;
-controls.update();
+// ========== FPS CONTROLS ==========
+const controls = new THREE.PointerLockControls(camera, document.body);
+const crosshair = document.getElementById('crosshair');
+
+// Click to lock pointer
+document.body.addEventListener('click', () => {
+  if (!controls.isLocked) controls.lock();
+});
+controls.addEventListener('lock', () => { crosshair.style.display = 'block'; });
+controls.addEventListener('unlock', () => { crosshair.style.display = 'none'; });
+
+// Movement state
+const moveState = { forward: false, backward: false, left: false, right: false, up: false, down: false, sprint: false };
+let moveSpeed = 800;
+const velocity = new THREE.Vector3();
+const direction = new THREE.Vector3();
+let clock = new THREE.Clock();
+
+// Scroll to adjust base speed
+window.addEventListener('wheel', (e) => {
+  if (!controls.isLocked) return;
+  moveSpeed = Math.max(100, Math.min(3000, moveSpeed - e.deltaY * 0.5));
+  e.preventDefault();
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  switch (e.code) {
+    case 'KeyW': case 'ArrowUp':    moveState.forward = true; break;
+    case 'KeyS': case 'ArrowDown':  moveState.backward = true; break;
+    case 'KeyA': case 'ArrowLeft':  moveState.left = true; break;
+    case 'KeyD': case 'ArrowRight': moveState.right = true; break;
+    case 'Space':    moveState.up = true; e.preventDefault(); break;
+    case 'ControlLeft': case 'ControlRight': moveState.down = true; break;
+    case 'ShiftLeft': case 'ShiftRight': moveState.sprint = true; break;
+  }
+});
+window.addEventListener('keyup', (e) => {
+  switch (e.code) {
+    case 'KeyW': case 'ArrowUp':    moveState.forward = false; break;
+    case 'KeyS': case 'ArrowDown':  moveState.backward = false; break;
+    case 'KeyA': case 'ArrowLeft':  moveState.left = false; break;
+    case 'KeyD': case 'ArrowRight': moveState.right = false; break;
+    case 'Space':    moveState.up = false; break;
+    case 'ControlLeft': case 'ControlRight': moveState.down = false; break;
+    case 'ShiftLeft': case 'ShiftRight': moveState.sprint = false; break;
+  }
+});
 
 // ========== LIGHTS ==========
 const ambient = new THREE.AmbientLight(0xffffff, 0.5);
@@ -163,61 +203,126 @@ function createChair() {
   return group;
 }
 
-// ========== DOMINO ==========
+// ========== DOMINO (OpenSCAD-inspired design) ==========
+// Dimensions: 48 x 24 x 10mm with 2mm bevel
+const DOM_L = 48, DOM_W = 24, DOM_H = 10, DOM_BEVEL = 2;
+const PIP_R = 2.5, PIP_DEPTH = 1.8, HOLE_DEPTH = 4;
+const GROOVE_W = 2.5, GROOVE_LEN = 17.5, GROOVE_DEPTH = 0.7;
+const CONCAVE_DEPTH = 1.8;
+
+const pipGrid = {
+  TL: [-3.75,  3.75], T: [-3.75, 0], TR: [-3.75, -3.75],
+  L:  [0,      3.75], C: [0,     0], R:  [0,     -3.75],
+  BL: [3.75,   3.75], B: [3.75,  0], BR: [3.75,  -3.75]
+};
+const pipLayouts = [
+  [],
+  ['C'],
+  ['TR', 'BL'],
+  ['TR', 'C', 'BL'],
+  ['TL', 'TR', 'BL', 'BR'],
+  ['TL', 'TR', 'C', 'BL', 'BR'],
+  ['TL', 'TR', 'L', 'R', 'BL', 'BR'],
+  ['TL', 'TR', 'L', 'C', 'R', 'BL', 'BR']
+];
+
+// Rounded box geometry (like minkowski in OpenSCAD)
+function createRoundedBox(w, h, d, r, segments) {
+  const shape = new THREE.Shape();
+  const x = w/2 - r, y = h/2 - r;
+  shape.moveTo(-x, -h/2);
+  shape.lineTo(x, -h/2);
+  shape.quadraticCurveTo(w/2, -h/2, w/2, -y);
+  shape.lineTo(w/2, y);
+  shape.quadraticCurveTo(w/2, h/2, x, h/2);
+  shape.lineTo(-x, h/2);
+  shape.quadraticCurveTo(-w/2, h/2, -w/2, y);
+  shape.lineTo(-w/2, -y);
+  shape.quadraticCurveTo(-w/2, -h/2, -x, -h/2);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: d - 2*r, bevelEnabled: true,
+    bevelThickness: r, bevelSize: r, bevelSegments: segments || 3
+  });
+  geo.translate(0, 0, -(d - 2*r)/2 - r);
+  return geo;
+}
+
+// Concave depression geometry (sphere cap approximation)
+function createConcavePip(radius, depth, segs) {
+  const sphereR = (radius*radius + depth*depth) / (2*depth);
+  const geo = new THREE.SphereGeometry(sphereR, segs || 24, segs || 24,
+    0, Math.PI*2, 0, Math.asin(radius/sphereR));
+  geo.rotateX(Math.PI);
+  return geo;
+}
+
 function createDomino(leftVal, rightVal) {
   const group = new THREE.Group();
+  const topZ = DOM_H / 2;
 
-  // Body with rounded edges
-  const bodyGeo = new THREE.BoxGeometry(48, 24, 10);
+  // 1. Ivory rounded body
+  const bodyGeo = createRoundedBox(DOM_L, DOM_W, DOM_H, DOM_BEVEL, 4);
   const body = new THREE.Mesh(bodyGeo, ivoryMat);
   body.castShadow = true;
   group.add(body);
 
-  // Center groove
-  const grooveGeo = new THREE.BoxGeometry(1.5, 17, 1.5);
-  const groove = new THREE.Mesh(grooveGeo, blackMat);
-  groove.position.z = 4.5;
-  group.add(groove);
+  // 2. Pip holes — dark cylinders inset into the ivory surface
+  const holeGeo = new THREE.CylinderGeometry(PIP_R, PIP_R, HOLE_DEPTH, 24);
+  const holeMat = new THREE.MeshPhongMaterial({ color: 0x0a0a0a });
 
-  const pipGrid = {
-    TL: [7.5, 7.5], T: [7.5, 0], TR: [7.5, -7.5],
-    L:  [0, 7.5],   C: [0, 0],   R:  [0, -7.5],
-    BL: [-7.5, 7.5], B: [-7.5, 0], BR: [-7.5, -7.5]
-  };
+  // 3. Colored concave pads — sit inside the holes, visible from above
+  const concaveGeo = createConcavePip(PIP_R - 0.2, CONCAVE_DEPTH, 20);
 
-  const pipLayouts = [
-    [],
-    ['C'],
-    ['TR', 'BL'],
-    ['TR', 'C', 'BL'],
-    ['TL', 'TR', 'BL', 'BR'],
-    ['TL', 'TR', 'C', 'BL', 'BR'],
-    ['TL', 'TR', 'L', 'R', 'BL', 'BR'],
-    ['TL', 'TR', 'L', 'C', 'R', 'BL', 'BR']
-  ];
+  function addPips(val, xOffset) {
+    if (val === 0) return;
+    const pipMat = new THREE.MeshPhongMaterial({ color: pipColors[val] });
+    for (const name of pipLayouts[val]) {
+      const [px, py] = pipGrid[name];
 
-  const pipGeo = new THREE.CylinderGeometry(2.2, 2.2, 1.5, 16);
-  pipGeo.rotateX(Math.PI / 2);
+      // Dark hole cylinder (recessed into body)
+      const hole = new THREE.Mesh(holeGeo, holeMat);
+      hole.position.set(xOffset + px, py, topZ - HOLE_DEPTH/2 + 0.05);
+      group.add(hole);
 
-  // Left pips
-  const leftMat = new THREE.MeshPhongMaterial({ color: pipColors[leftVal] });
-  for (const name of pipLayouts[leftVal]) {
-    const [px, py] = pipGrid[name];
-    const pip = new THREE.Mesh(pipGeo, leftMat);
-    pip.position.set(-12 + px * 0.5, py * 0.5, 4.5);
-    pip.rotation.x = Math.PI / 2;
-    group.add(pip);
+      // Colored pad at bottom of hole
+      const pad = new THREE.Mesh(concaveGeo, pipMat);
+      pad.position.set(xOffset + px, py, topZ - HOLE_DEPTH + 0.5);
+      group.add(pad);
+    }
   }
 
-  // Right pips
-  const rightMat = new THREE.MeshPhongMaterial({ color: pipColors[rightVal] });
-  for (const name of pipLayouts[rightVal]) {
-    const [px, py] = pipGrid[name];
-    const pip = new THREE.Mesh(pipGeo, rightMat);
-    pip.position.set(12 + px * 0.5, py * 0.5, 4.5);
-    pip.rotation.x = Math.PI / 2;
-    group.add(pip);
-  }
+  addPips(leftVal, -DOM_L/4);
+  addPips(rightVal, DOM_L/4);
+
+  // 4. Pill-shaped center groove (like hull of two cylinders in OpenSCAD)
+  const grooveGroup = new THREE.Group();
+  // Main groove channel — dark recessed area
+  const groovePath = new THREE.Shape();
+  const gr = GROOVE_W / 2;
+  const gl = GROOVE_LEN / 2;
+  groovePath.moveTo(-gl, -gr);
+  groovePath.lineTo(gl, -gr);
+  groovePath.arc(0, gr, gr, -Math.PI/2, Math.PI/2);
+  groovePath.lineTo(-gl, gr);
+  groovePath.arc(0, -gr, gr, Math.PI/2, -Math.PI/2);
+  const grooveExtGeo = new THREE.ExtrudeGeometry(groovePath, {
+    depth: HOLE_DEPTH, bevelEnabled: false
+  });
+  grooveExtGeo.rotateX(Math.PI/2);
+  const grooveMesh = new THREE.Mesh(grooveExtGeo, blackMat);
+  grooveMesh.position.set(0, gl, topZ - HOLE_DEPTH + 0.05);
+  grooveMesh.rotation.z = Math.PI/2;
+  grooveGroup.add(grooveMesh);
+
+  // Groove concave surface — dark depression on top
+  const grooveSurfR = (gr*gr + GROOVE_DEPTH*GROOVE_DEPTH) / (2*GROOVE_DEPTH);
+  const grooveSurfGeo = new THREE.CylinderGeometry(gr - 0.1, gr - 0.1, GROOVE_LEN, 24, 1, true);
+  const grooveSurf = new THREE.Mesh(grooveSurfGeo, blackMat);
+  grooveSurf.position.set(0, 0, topZ - 0.3);
+  grooveSurf.rotation.x = Math.PI/2;
+  grooveGroup.add(grooveSurf);
+
+  group.add(grooveGroup);
 
   return group;
 }
@@ -331,7 +436,24 @@ for (let seat = 0; seat < 6; seat++) {
 // ========== ANIMATION LOOP ==========
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
+  const delta = clock.getDelta();
+
+  if (controls.isLocked) {
+    const speed = moveSpeed * (moveState.sprint ? 2.5 : 1) * delta;
+
+    // Forward/backward and left/right
+    direction.z = Number(moveState.forward) - Number(moveState.backward);
+    direction.x = Number(moveState.right) - Number(moveState.left);
+    direction.normalize();
+
+    if (moveState.forward || moveState.backward) controls.moveForward(direction.z * speed);
+    if (moveState.left || moveState.right) controls.moveRight(direction.x * speed);
+
+    // Up/down (world Y in Three.js, but we use Z-up so move camera.position.z)
+    if (moveState.up) camera.position.z += speed;
+    if (moveState.down) camera.position.z -= speed;
+  }
+
   renderer.render(scene, camera);
 }
 animate();
