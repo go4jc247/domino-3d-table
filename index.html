@@ -102,7 +102,7 @@ function createTable() {
   // Felt
   const feltGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS - RAIL_WIDTH, 30), { depth: FELT_DEPTH, bevelEnabled: false });
   const felt = new THREE.Mesh(feltGeo, feltMat);
-  felt.position.z = TOP_THICKNESS - FELT_DEPTH;
+  felt.position.z = TOP_THICKNESS - FELT_DEPTH + 1;
   felt.receiveShadow = true;
   group.add(felt);
 
@@ -301,7 +301,7 @@ const hands = [
 // Racks with dominoes — at flat edges (30° offset to match table)
 const rackDist = APOTHEM - 60;
 for (let seat = 0; seat < 6; seat++) {
-  const angle = (seat * 60 + 30) * Math.PI / 180;
+  const angle = seat * 60 * Math.PI / 180;
   const rackGroup = new THREE.Group();
 
   // Rack
