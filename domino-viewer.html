@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Domino Viewer</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #1a1a2e; }
+    canvas { display: block; }
+    #controls {
+      position: absolute; top: 10px; left: 10px;
+      font-family: monospace; font-size: 14px; color: #ccc;
+      display: flex; gap: 12px; align-items: center;
+    }
+    #controls select {
+      font-size: 14px; padding: 4px 8px;
+      background: #333; color: #fff; border: 1px solid #555;
+      border-radius: 4px;
+    }
+    #info {
+      position: absolute; bottom: 10px; left: 10px;
+      color: #666; font-family: monospace; font-size: 12px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="controls">
+  <label>Left: <select id="leftVal"></select></label>
+  <label>Right: <select id="rightVal"></select></label>
+</div>
+<div id="info">Left-drag: rotate | Right-drag: pan | Scroll: zoom</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ========== SCENE ==========
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.position.set(0, -60, 45);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 20;
+controls.maxDistance = 200;
+controls.update();
+
+// ========== LIGHTS ==========
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const spot = new THREE.SpotLight(0xffffff, 0.8);
+spot.position.set(30, -30, 80);
+spot.castShadow = true;
+scene.add(spot);
+const fill = new THREE.PointLight(0xffffff, 0.3);
+fill.position.set(-40, 20, 30);
+scene.add(fill);
+
+// Subtle ground plane for shadow
+const groundGeo = new THREE.PlaneGeometry(200, 200);
+const groundMat = new THREE.MeshPhongMaterial({ color: 0x222238 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.position.z = -6;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ========== MATERIALS ==========
+const ivoryMat = new THREE.MeshPhongMaterial({ color: 0xFFFFF0 });
+const blackMat = new THREE.MeshPhongMaterial({ color: 0x111111 });
+
+const pipColors = [
+  0x141416, 0x36B258, 0xF0C73D, 0xE74C3C,
+  0x00B2FF, 0x9B59B6, 0xA76E34, 0x3B82F6
+];
+
+// ========== DOMINO GEOMETRY ==========
+const DOM_L = 48, DOM_W = 24, DOM_H = 10, DOM_BEVEL = 2;
+const PIP_R = 2.5, PIP_DEPTH = 1.8, HOLE_DEPTH = 4;
+const GROOVE_W = 2.5, GROOVE_LEN = 17.5, GROOVE_DEPTH = 0.7;
+const CONCAVE_DEPTH = 1.8;
+
+const pipGrid = {
+  TL: [-3.75,  3.75], T: [-3.75, 0], TR: [-3.75, -3.75],
+  L:  [0,      3.75], C: [0,     0], R:  [0,     -3.75],
+  BL: [3.75,   3.75], B: [3.75,  0], BR: [3.75,  -3.75]
+};
+const pipLayouts = [
+  [],
+  ['C'],
+  ['TR', 'BL'],
+  ['TR', 'C', 'BL'],
+  ['TL', 'TR', 'BL', 'BR'],
+  ['TL', 'TR', 'C', 'BL', 'BR'],
+  ['TL', 'TR', 'L', 'R', 'BL', 'BR'],
+  ['TL', 'TR', 'L', 'C', 'R', 'BL', 'BR']
+];
+
+function createRoundedBox(w, h, d, r, segments) {
+  const shape = new THREE.Shape();
+  const x = w/2 - r, y = h/2 - r;
+  shape.moveTo(-x, -h/2);
+  shape.lineTo(x, -h/2);
+  shape.quadraticCurveTo(w/2, -h/2, w/2, -y);
+  shape.lineTo(w/2, y);
+  shape.quadraticCurveTo(w/2, h/2, x, h/2);
+  shape.lineTo(-x, h/2);
+  shape.quadraticCurveTo(-w/2, h/2, -w/2, y);
+  shape.lineTo(-w/2, -y);
+  shape.quadraticCurveTo(-w/2, -h/2, -x, -h/2);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: d - 2*r, bevelEnabled: true,
+    bevelThickness: r, bevelSize: r, bevelSegments: segments || 3
+  });
+  geo.translate(0, 0, -(d - 2*r)/2 - r);
+  return geo;
+}
+
+function createConcavePip(radius, depth, segs) {
+  const sphereR = (radius*radius + depth*depth) / (2*depth);
+  const geo = new THREE.SphereGeometry(sphereR, segs || 24, segs || 24,
+    0, Math.PI*2, 0, Math.asin(radius/sphereR));
+  geo.rotateX(Math.PI);
+  return geo;
+}
+
+function createDomino(leftVal, rightVal) {
+  const group = new THREE.Group();
+  const topZ = DOM_H / 2;
+
+  // 1. Ivory rounded body
+  const bodyGeo = createRoundedBox(DOM_L, DOM_W, DOM_H, DOM_BEVEL, 4);
+  const body = new THREE.Mesh(bodyGeo, ivoryMat);
+  body.castShadow = true;
+  group.add(body);
+
+  // 2. Pip holes + colored concave pads
+  const holeGeo = new THREE.CylinderGeometry(PIP_R, PIP_R, HOLE_DEPTH, 24);
+  const holeMat = new THREE.MeshPhongMaterial({ color: 0x0a0a0a });
+  const concaveGeo = createConcavePip(PIP_R - 0.2, CONCAVE_DEPTH, 20);
+
+  function addPips(val, xOffset) {
+    if (val === 0) return;
+    const pipMat = new THREE.MeshPhongMaterial({ color: pipColors[val] });
+    for (const name of pipLayouts[val]) {
+      const [px, py] = pipGrid[name];
+      const hole = new THREE.Mesh(holeGeo, holeMat);
+      hole.position.set(xOffset + px, py, topZ - HOLE_DEPTH/2 + 0.05);
+      group.add(hole);
+      const pad = new THREE.Mesh(concaveGeo, pipMat);
+      pad.position.set(xOffset + px, py, topZ - HOLE_DEPTH + 0.5);
+      group.add(pad);
+    }
+  }
+
+  addPips(leftVal, -DOM_L/4);
+  addPips(rightVal, DOM_L/4);
+
+  // 3. Pill-shaped center groove
+  const grooveGroup = new THREE.Group();
+  const groovePath = new THREE.Shape();
+  const gr = GROOVE_W / 2;
+  const gl = GROOVE_LEN / 2;
+  groovePath.moveTo(-gl, -gr);
+  groovePath.lineTo(gl, -gr);
+  groovePath.arc(0, gr, gr, -Math.PI/2, Math.PI/2);
+  groovePath.lineTo(-gl, gr);
+  groovePath.arc(0, -gr, gr, Math.PI/2, -Math.PI/2);
+  const grooveExtGeo = new THREE.ExtrudeGeometry(groovePath, {
+    depth: HOLE_DEPTH, bevelEnabled: false
+  });
+  grooveExtGeo.rotateX(Math.PI/2);
+  const grooveMesh = new THREE.Mesh(grooveExtGeo, blackMat);
+  grooveMesh.position.set(0, gl, topZ - HOLE_DEPTH + 0.05);
+  grooveMesh.rotation.z = Math.PI/2;
+  grooveGroup.add(grooveMesh);
+
+  const grooveSurfGeo = new THREE.CylinderGeometry(gr - 0.1, gr - 0.1, GROOVE_LEN, 24, 1, true);
+  const grooveSurf = new THREE.Mesh(grooveSurfGeo, blackMat);
+  grooveSurf.position.set(0, 0, topZ - 0.3);
+  grooveSurf.rotation.x = Math.PI/2;
+  grooveGroup.add(grooveSurf);
+  group.add(grooveGroup);
+
+  return group;
+}
+
+// ========== UI ==========
+const leftSel = document.getElementById('leftVal');
+const rightSel = document.getElementById('rightVal');
+for (let i = 0; i <= 7; i++) {
+  leftSel.innerHTML += `<option value="${i}" ${i===5?'selected':''}>${i}</option>`;
+  rightSel.innerHTML += `<option value="${i}" ${i===3?'selected':''}>${i}</option>`;
+}
+
+let currentDomino = null;
+function updateDomino() {
+  if (currentDomino) scene.remove(currentDomino);
+  currentDomino = createDomino(+leftSel.value, +rightSel.value);
+  scene.add(currentDomino);
+}
+leftSel.addEventListener('change', updateDomino);
+rightSel.addEventListener('change', updateDomino);
+updateDomino();
+
+// ========== ANIMATE ==========
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
