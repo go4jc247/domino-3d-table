@@ -1,42 +1,65 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Domino Table - WebGL Demo</title>
+  <title>Domino Table - 3D View</title>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
+    #info {
+      position: absolute; bottom: 10px; left: 10px;
+      color: #aaa; font-family: monospace; font-size: 13px;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
+<div id="info">Left-drag: rotate | Right-drag: pan | Scroll: zoom</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 // ========== SCENE SETUP ==========
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1a2e);
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 5000);
-camera.position.set(0, -1200, 900);
-camera.lookAt(0, 0, 0);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 8000);
+camera.position.set(0, -1800, 1200);
+camera.lookAt(0, 0, 45);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
+// ========== ORBIT CONTROLS ==========
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 45);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 400;
+controls.maxDistance = 5000;
+controls.update();
+
 // ========== LIGHTS ==========
-const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+const ambient = new THREE.AmbientLight(0xffffff, 0.5);
 scene.add(ambient);
 
-const spot = new THREE.SpotLight(0xffffff, 0.8);
-spot.position.set(0, 0, 1500);
+const spot = new THREE.SpotLight(0xffffff, 0.7);
+spot.position.set(0, 0, 2000);
 spot.castShadow = true;
 scene.add(spot);
+
+const fill = new THREE.PointLight(0xffffff, 0.3);
+fill.position.set(-800, -800, 600);
+scene.add(fill);
 
 // ========== MATERIALS ==========
 const woodMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
 const feltMat = new THREE.MeshPhongMaterial({ color: 0x006400 });
+const railMat = new THREE.MeshPhongMaterial({ color: 0x5C3317 });
 const ivoryMat = new THREE.MeshPhongMaterial({ color: 0xFFFFF0 });
 const blackMat = new THREE.MeshPhongMaterial({ color: 0x111111 });
+const chairMat = new THREE.MeshPhongMaterial({ color: 0xCD853F });
+const rackMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
 
 // Pip colors from TX-Dom-Dev
 const pipColors = [
@@ -44,52 +67,95 @@ const pipColors = [
   0x00B2FF, 0x9B59B6, 0xA76E34, 0x3B82F6
 ];
 
-// ========== HEXAGONAL TABLE ==========
-function createHexTable() {
-  const group = new THREE.Group();
+// ========== CONSTANTS ==========
+const TABLE_RADIUS = 900;
+const TOP_THICKNESS = 45;
+const RAIL_WIDTH = 120;
+const FELT_DEPTH = 3;
+const LEG_HEIGHT = 700;
+const APOTHEM = TABLE_RADIUS * Math.cos(Math.PI / 6);
 
-  // Table top
-  const hexShape = new THREE.Shape();
-  const radius = 900;
+// ========== HEXAGONAL SHAPE HELPER ==========
+function hexShape(radius, offsetDeg) {
+  const shape = new THREE.Shape();
   for (let i = 0; i < 6; i++) {
-    const angle = (i * 60 + 30) * Math.PI / 180;
+    const angle = (i * 60 + offsetDeg) * Math.PI / 180;
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
-    if (i === 0) hexShape.moveTo(x, y);
-    else hexShape.lineTo(x, y);
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
   }
-  hexShape.closePath();
+  shape.closePath();
+  return shape;
+}
 
-  const topGeo = new THREE.ExtrudeGeometry(hexShape, { depth: 45, bevelEnabled: false });
-  const top = new THREE.Mesh(topGeo, woodMat);
+// ========== TABLE ==========
+function createTable() {
+  const group = new THREE.Group();
+
+  // Rail (full hex)
+  const topGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS, 30), { depth: TOP_THICKNESS, bevelEnabled: false });
+  const top = new THREE.Mesh(topGeo, railMat);
   top.receiveShadow = true;
   group.add(top);
 
-  // Felt (slightly smaller hex, on top)
-  const feltShape = new THREE.Shape();
-  const feltR = radius - 120;
-  for (let i = 0; i < 6; i++) {
-    const angle = (i * 60 + 30) * Math.PI / 180;
-    const x = feltR * Math.cos(angle);
-    const y = feltR * Math.sin(angle);
-    if (i === 0) feltShape.moveTo(x, y);
-    else feltShape.lineTo(x, y);
-  }
-  feltShape.closePath();
-
-  const feltGeo = new THREE.ExtrudeGeometry(feltShape, { depth: 3, bevelEnabled: false });
+  // Felt
+  const feltGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS - RAIL_WIDTH, 30), { depth: FELT_DEPTH, bevelEnabled: false });
   const felt = new THREE.Mesh(feltGeo, feltMat);
-  felt.position.z = 42;
+  felt.position.z = TOP_THICKNESS - FELT_DEPTH;
   felt.receiveShadow = true;
   group.add(felt);
 
   // Legs
-  const legGeo = new THREE.BoxGeometry(65, 65, 700);
-  const legR = radius - 120;
+  const legGeo = new THREE.BoxGeometry(65, 65, LEG_HEIGHT);
+  const legR = TABLE_RADIUS - 120;
   for (let i = 0; i < 6; i++) {
     const angle = (i * 60 + 30) * Math.PI / 180;
     const leg = new THREE.Mesh(legGeo, woodMat);
-    leg.position.set(legR * Math.cos(angle), legR * Math.sin(angle), -350);
+    leg.position.set(legR * Math.cos(angle), legR * Math.sin(angle), -LEG_HEIGHT / 2);
+    leg.castShadow = true;
+    group.add(leg);
+  }
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(6000, 6000);
+  const floorMat = new THREE.MeshPhongMaterial({ color: 0x2a2a3e });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.position.z = -LEG_HEIGHT;
+  floor.receiveShadow = true;
+  group.add(floor);
+
+  return group;
+}
+
+// ========== CHAIR ==========
+function createChair() {
+  const group = new THREE.Group();
+  const sw = 450, sd = 450, st = 40, sh = 450, bh = 500, bt = 30, cls = 40;
+
+  // Seat
+  const seatGeo = new THREE.BoxGeometry(sd, sw, st);
+  const seat = new THREE.Mesh(seatGeo, chairMat);
+  seat.position.set(0, 0, sh - st / 2);
+  group.add(seat);
+
+  // Backrest
+  const backGeo = new THREE.BoxGeometry(bt, sw, bh);
+  const back = new THREE.Mesh(backGeo, chairMat);
+  back.position.set(sd / 2 - bt / 2, 0, sh + bh / 2);
+  group.add(back);
+
+  // Legs
+  const legGeo = new THREE.BoxGeometry(cls, cls, sh - st);
+  const positions = [
+    [-sd/2 + cls/2, -sw/2 + cls/2],
+    [sd/2 - cls/2, -sw/2 + cls/2],
+    [-sd/2 + cls/2, sw/2 - cls/2],
+    [sd/2 - cls/2, sw/2 - cls/2]
+  ];
+  for (const [x, y] of positions) {
+    const leg = new THREE.Mesh(legGeo, chairMat);
+    leg.position.set(x, y, (sh - st) / 2);
     leg.castShadow = true;
     group.add(leg);
   }
@@ -97,27 +163,26 @@ function createHexTable() {
   return group;
 }
 
-// ========== SIMPLE DOMINO ==========
+// ========== DOMINO ==========
 function createDomino(leftVal, rightVal) {
   const group = new THREE.Group();
 
-  // Body
+  // Body with rounded edges
   const bodyGeo = new THREE.BoxGeometry(48, 24, 10);
   const body = new THREE.Mesh(bodyGeo, ivoryMat);
   body.castShadow = true;
   group.add(body);
 
   // Center groove
-  const grooveGeo = new THREE.BoxGeometry(1, 17, 1);
+  const grooveGeo = new THREE.BoxGeometry(1.5, 17, 1.5);
   const groove = new THREE.Mesh(grooveGeo, blackMat);
-  groove.position.z = 5;
+  groove.position.z = 4.5;
   group.add(groove);
 
-  // Pip positions on a 24x24 half
   const pipGrid = {
-    TL: [9, 9], T: [9, 0], TR: [9, -9],
-    L:  [0, 9], C: [0, 0], R:  [0, -9],
-    BL: [-9, 9], B: [-9, 0], BR: [-9, -9]
+    TL: [7.5, 7.5], T: [7.5, 0], TR: [7.5, -7.5],
+    L:  [0, 7.5],   C: [0, 0],   R:  [0, -7.5],
+    BL: [-7.5, 7.5], B: [-7.5, 0], BR: [-7.5, -7.5]
   };
 
   const pipLayouts = [
@@ -131,98 +196,144 @@ function createDomino(leftVal, rightVal) {
     ['TL', 'TR', 'L', 'C', 'R', 'BL', 'BR']
   ];
 
-  // Add pips
-  const pipGeo = new THREE.SphereGeometry(2.4, 16, 16);
+  const pipGeo = new THREE.CylinderGeometry(2.2, 2.2, 1.5, 16);
+  pipGeo.rotateX(Math.PI / 2);
 
-  // Left half pips
+  // Left pips
   const leftMat = new THREE.MeshPhongMaterial({ color: pipColors[leftVal] });
   for (const name of pipLayouts[leftVal]) {
-    const pos = pipGrid[name];
+    const [px, py] = pipGrid[name];
     const pip = new THREE.Mesh(pipGeo, leftMat);
-    pip.position.set(-12 + pos[0] * 0.5, pos[1] * 0.5, 4);
-    pip.scale.z = 0.4;
+    pip.position.set(-12 + px * 0.5, py * 0.5, 4.5);
+    pip.rotation.x = Math.PI / 2;
     group.add(pip);
   }
 
-  // Right half pips
+  // Right pips
   const rightMat = new THREE.MeshPhongMaterial({ color: pipColors[rightVal] });
   for (const name of pipLayouts[rightVal]) {
-    const pos = pipGrid[name];
+    const [px, py] = pipGrid[name];
     const pip = new THREE.Mesh(pipGeo, rightMat);
-    pip.position.set(12 + pos[0] * 0.5, pos[1] * 0.5, 4);
-    pip.scale.z = 0.4;
+    pip.position.set(12 + px * 0.5, py * 0.5, 4.5);
+    pip.rotation.x = Math.PI / 2;
     group.add(pip);
   }
 
   return group;
 }
 
-// ========== BUILD SCENE ==========
-const table = createHexTable();
-scene.add(table);
+// ========== RACK ==========
+function createRack() {
+  const group = new THREE.Group();
+  const rackLen = 170, rackDep = 29, baseH = 6;
+  const backH = 38, backT = 4;
+  const lipH = 8, lipT = 3;
+  const guardH = 58, guardT = 3, guardDep = 39;
+  const leanRad = 12 * Math.PI / 180;
 
-// ========== PLAY SEQUENCE ==========
-const plays = [
-  { left: 5, right: 5, x: 0, y: 0, rot: 0 },
-  { left: 5, right: 3, x: 48, y: 0, rot: 0 },
-  { left: 3, right: 7, x: 96, y: 0, rot: 0 },
-  { left: 5, right: 2, x: -48, y: 0, rot: 0 },
-  { left: 5, right: 0, x: 0, y: -48, rot: Math.PI/2 },
-  { left: 5, right: 1, x: 0, y: 48, rot: Math.PI/2 },
-];
+  // Base
+  const baseGeo = new THREE.BoxGeometry(rackLen, rackDep, baseH);
+  const base = new THREE.Mesh(baseGeo, rackMat);
+  base.position.z = baseH / 2;
+  group.add(base);
 
-const dominoes = [];
-const domTargets = [];
-let nextPlay = 0;
-let playTimer = 0;
-const playInterval = 2000;  // ms between plays
+  // Back wall
+  const backGeo = new THREE.BoxGeometry(rackLen, backT, backH);
+  const back = new THREE.Mesh(backGeo, rackMat);
+  back.position.set(0, rackDep/2 - backT/2 - 12, baseH + backH/2);
+  back.rotation.x = -leanRad;
+  group.add(back);
 
-// ========== ANIMATION LOOP ==========
-const clock = new THREE.Clock();
+  // Front lip
+  const lipGeo = new THREE.BoxGeometry(rackLen, lipT, lipH);
+  const lip = new THREE.Mesh(lipGeo, rackMat);
+  lip.position.set(0, -rackDep/2 + lipT/2, baseH + lipH/2);
+  group.add(lip);
 
-function animate() {
-  requestAnimationFrame(animate);
-  const dt = clock.getDelta() * 1000;
-
-  // Camera slowly orbits
-  const t = clock.getElapsedTime();
-  camera.position.x = 1200 * Math.sin(t * 0.1);
-  camera.position.y = -1200 * Math.cos(t * 0.1);
-  camera.lookAt(0, 0, 45);
-
-  // Play dominoes on timer
-  playTimer += dt;
-  if (playTimer > playInterval && nextPlay < plays.length) {
-    const p = plays[nextPlay];
-    const dom = createDomino(p.left, p.right);
-
-    // Start high above table
-    dom.position.set(p.x, p.y, 400);
-    dom.rotation.z = p.rot;
-    scene.add(dom);
-
-    dominoes.push(dom);
-    domTargets.push({ z: 50, done: false });
-    nextPlay++;
-    playTimer = 0;
+  // Guards
+  for (const side of [-1, 1]) {
+    const guardGeo = new THREE.BoxGeometry(guardT, guardDep, guardH);
+    const guard = new THREE.Mesh(guardGeo, rackMat);
+    guard.position.set(side * (rackLen/2 - guardT/2), -10, baseH + guardH/2);
+    guard.rotation.x = -leanRad;
+    group.add(guard);
   }
 
-  // Animate falling dominoes
-  for (let i = 0; i < dominoes.length; i++) {
-    if (!domTargets[i].done) {
-      const dom = dominoes[i];
-      const target = domTargets[i].z;
-      dom.position.z += (target - dom.position.z) * 0.08;
-      if (Math.abs(dom.position.z - target) < 0.5) {
-        dom.position.z = target;
-        domTargets[i].done = true;
-      }
-    }
-  }
-
-  renderer.render(scene, camera);
+  return group;
 }
 
+// ========== STANDING DOMINO IN RACK ==========
+function createStandingDomino(leftVal, rightVal) {
+  const dom = createDomino(leftVal, rightVal);
+  // Stand upright, lean back slightly
+  dom.rotation.x = (90 - 12) * Math.PI / 180;
+  dom.rotation.z = Math.PI / 2;
+  return dom;
+}
+
+// ========== BUILD SCENE ==========
+scene.add(createTable());
+
+// Chairs — at flat edges (no 30° offset)
+const chairDist = APOTHEM + 80 + 225;
+for (let i = 0; i < 6; i++) {
+  const angle = i * 60 * Math.PI / 180;
+  const chair = createChair();
+  chair.position.set(
+    chairDist * Math.cos(angle),
+    chairDist * Math.sin(angle),
+    -LEG_HEIGHT
+  );
+  chair.rotation.z = angle;
+  scene.add(chair);
+}
+
+// Hands
+const hands = [
+  [[5,5], [5,3], [5,2], [5,0], [5,1], [5,7]],
+  [[3,7], [1,4], [0,6], [2,7], [6,1], [4,4]],
+  [[4,7], [0,2], [7,7], [1,7], [3,6], [2,4]],
+  [[6,6], [0,3], [2,2], [3,4], [4,6], [1,1]],
+  [[0,7], [3,5], [0,1], [2,3], [4,5], [6,7]],
+  [[0,4], [1,2], [1,3], [5,6], [3,3], [2,6]]
+];
+
+// Racks with dominoes — at flat edges (30° offset to match table)
+const rackDist = APOTHEM - 60;
+for (let seat = 0; seat < 6; seat++) {
+  const angle = (seat * 60 + 30) * Math.PI / 180;
+  const rackGroup = new THREE.Group();
+
+  // Rack
+  const rack = createRack();
+  rackGroup.add(rack);
+
+  // 6 dominoes standing in rack
+  const tileSpacing = 25;
+  const startX = -(5) * tileSpacing / 2;
+  for (let ti = 0; ti < 6; ti++) {
+    const [l, r] = hands[seat][ti];
+    const dom = createStandingDomino(l, r);
+    dom.position.set(startX + ti * tileSpacing, 3, 6 + 24);
+    rackGroup.add(dom);
+  }
+
+  // Position rack on table
+  rackGroup.position.set(
+    rackDist * Math.cos(angle),
+    rackDist * Math.sin(angle),
+    TOP_THICKNESS
+  );
+  rackGroup.rotation.z = angle + Math.PI;
+  scene.add(rackGroup);
+}
+
+// ========== ANIMATION LOOP ==========
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
 animate();
 
 // ========== RESIZE ==========
