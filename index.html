@@ -13,7 +13,7 @@
   </style>
 </head>
 <body>
-<div id="info">Click to walk around | WASD: walk | Mouse: look | Shift: run | ESC: release</div>
+<div id="info">Click: enable | WASD: walk | Mouse: look | Shift: run | Space: rise | Ctrl: lower | ESC: release</div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -60,7 +60,7 @@ document.addEventListener('mousemove', (e) => {
 });
 
 // Movement state
-const moveState = { forward: false, backward: false, left: false, right: false, sprint: false };
+const moveState = { forward: false, backward: false, left: false, right: false, sprint: false, up: false, down: false };
 const walkSpeed = 600;
 const clock = new THREE.Clock();
 
@@ -71,6 +71,8 @@ window.addEventListener('keydown', (e) => {
     case 'KeyA': case 'ArrowLeft':  moveState.left = true; break;
     case 'KeyD': case 'ArrowRight': moveState.right = true; break;
     case 'ShiftLeft': case 'ShiftRight': moveState.sprint = true; break;
+    case 'Space':        moveState.up = true; e.preventDefault(); break;
+    case 'ControlLeft': case 'ControlRight': moveState.down = true; break;
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -80,6 +82,8 @@ window.addEventListener('keyup', (e) => {
     case 'KeyA': case 'ArrowLeft':  moveState.left = false; break;
     case 'KeyD': case 'ArrowRight': moveState.right = false; break;
     case 'ShiftLeft': case 'ShiftRight': moveState.sprint = false; break;
+    case 'Space':        moveState.up = false; break;
+    case 'ControlLeft': case 'ControlRight': moveState.down = false; break;
   }
 });
 
@@ -465,8 +469,9 @@ function animate() {
       camera.position.y += (moveY / len) * speed;
     }
 
-    // Camera always at eye height (locked to ground)
-    camera.position.z = CAM_Z;
+    // Raise/lower perspective
+    if (moveState.up) camera.position.z += speed;
+    if (moveState.down) camera.position.z -= speed;
   }
 
   // Update camera look direction from yaw/pitch
