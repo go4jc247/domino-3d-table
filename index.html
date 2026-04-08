@@ -53,21 +53,15 @@
 </div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
 <div id="ffBadge" onclick="toggleFF()" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#ff0;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;text-shadow:0 0 8px rgba(255,255,0,0.6);padding:8px 16px;-webkit-tap-highlight-color:transparent;">&#9654;&#9654; 10x</div>
-<div id="armPanel" style="display:none;position:fixed;bottom:60px;left:10px;font-family:monospace;font-size:13px;color:#ccc;background:rgba(0,0,0,0.7);padding:10px;border-radius:8px;z-index:10;-webkit-tap-highlight-color:transparent;">
-  <div style="margin-bottom:6px;color:#ff0;font-weight:bold;">Arm Tuning <span onclick="toggleArmPanel()" style="cursor:pointer;float:right;padding:0 6px;">✕</span></div>
-  <div style="display:flex;gap:6px;align-items:center;margin:4px 0;">
-    <span style="width:70px;">Shldr:</span>
-    <button onclick="adjArm('shoulder',-0.1)" style="font-size:16px;padding:2px 10px;">−</button>
-    <span id="shVal" style="width:40px;text-align:center;">-0.35</span>
-    <button onclick="adjArm('shoulder',0.1)" style="font-size:16px;padding:2px 10px;">+</button>
+<div id="armPanel" style="display:none;position:fixed;bottom:60px;left:10px;font-family:monospace;font-size:12px;color:#ccc;background:rgba(0,0,0,0.8);padding:10px;border-radius:8px;z-index:10;-webkit-tap-highlight-color:transparent;max-height:70vh;overflow-y:auto;">
+  <div style="margin-bottom:6px;color:#ff0;font-weight:bold;">Arm Poses <span onclick="toggleArmPanel()" style="cursor:pointer;float:right;padding:0 6px;">✕</span></div>
+  <div id="armPoseControls"></div>
+  <div style="margin-top:8px;display:flex;gap:6px;">
+    <button onclick="testArmPose('reach')" style="font-size:11px;padding:3px 8px;">Test Reach</button>
+    <button onclick="testArmPose('lift')" style="font-size:11px;padding:3px 8px;">Test Lift</button>
+    <button onclick="testArmPose('throw')" style="font-size:11px;padding:3px 8px;">Test Throw</button>
+    <button onclick="testArmPose('table')" style="font-size:11px;padding:3px 8px;">Reset</button>
   </div>
-  <div style="display:flex;gap:6px;align-items:center;margin:4px 0;">
-    <span style="width:70px;">Elbow:</span>
-    <button onclick="adjArm('elbow',-0.1)" style="font-size:16px;padding:2px 10px;">−</button>
-    <span id="elVal" style="width:40px;text-align:center;">-2.10</span>
-    <button onclick="adjArm('elbow',0.1)" style="font-size:16px;padding:2px 10px;">+</button>
-  </div>
-  <div style="margin-top:6px;font-size:11px;color:#999;">Adjusts all seated characters</div>
 </div>
 <button id="armBtn" onclick="toggleArmPanel()" style="display:none;position:fixed;bottom:60px;left:10px;font-family:monospace;font-size:12px;color:#ccc;background:rgba(0,0,0,0.6);border:1px solid #555;border-radius:6px;padding:6px 10px;cursor:pointer;z-index:10;-webkit-tap-highlight-color:transparent;">🦾 Arms</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -1095,6 +1089,7 @@ function createWalkingMannequin(charIndex) {
     const hand = new THREE.Mesh(new THREE.SphereGeometry(14, 8, 8), skinMat);
     hand.position.z = -forearmLen;
     ePivot.add(hand);
+    joints['hand' + label] = hand;
   }
 
   // === LEGS ===
@@ -1217,31 +1212,70 @@ function toggleFF() {
 
 // Arm tuning panel
 let armPanelOpen = false;
+let currentTestPose = 'table';
 function toggleArmPanel() {
   armPanelOpen = !armPanelOpen;
   document.getElementById('armPanel').style.display = armPanelOpen ? 'block' : 'none';
   document.getElementById('armBtn').style.display = armPanelOpen ? 'none' : 'block';
+  if (armPanelOpen) buildArmPoseUI();
 }
-function adjArm(joint, delta) {
-  if (joint === 'shoulder') {
-    TABLE_ARM_POSE.shoulderL.y = Math.round((TABLE_ARM_POSE.shoulderL.y + delta) * 100) / 100;
-    TABLE_ARM_POSE.shoulderR.y = TABLE_ARM_POSE.shoulderL.y;
-    document.getElementById('shVal').textContent = TABLE_ARM_POSE.shoulderL.y.toFixed(2);
-  } else {
-    TABLE_ARM_POSE.elbowL.y = Math.round((TABLE_ARM_POSE.elbowL.y + delta) * 100) / 100;
-    TABLE_ARM_POSE.elbowR.y = TABLE_ARM_POSE.elbowL.y;
-    document.getElementById('elVal').textContent = TABLE_ARM_POSE.elbowL.y.toFixed(2);
+function buildArmPoseUI() {
+  const container = document.getElementById('armPoseControls');
+  let html = '';
+  const poses = ['table', 'reach', 'lift', 'throw'];
+  const fields = [
+    { key: 'shX', label: 'Sh.X' },
+    { key: 'shY', label: 'Sh.Y' },
+    { key: 'elX', label: 'El.X' },
+    { key: 'elY', label: 'El.Y' }
+  ];
+  for (const pose of poses) {
+    const color = pose === currentTestPose ? '#ff0' : '#aaa';
+    html += `<div style="margin:6px 0 2px;color:${color};font-weight:bold;font-size:11px;">${pose.toUpperCase()}</div>`;
+    for (const f of fields) {
+      const val = ARM_POSE[pose][f.key];
+      html += `<div style="display:flex;gap:4px;align-items:center;margin:1px 0;">
+        <span style="width:36px;font-size:11px;">${f.label}:</span>
+        <button onclick="adjArmPose('${pose}','${f.key}',-0.1)" style="font-size:14px;padding:1px 8px;">−</button>
+        <span id="ap_${pose}_${f.key}" style="width:42px;text-align:center;font-size:11px;">${val.toFixed(2)}</span>
+        <button onclick="adjArmPose('${pose}','${f.key}',0.1)" style="font-size:14px;padding:1px 8px;">+</button>
+      </div>`;
+    }
   }
-  // Apply to all seated mannequins immediately
+  container.innerHTML = html;
+}
+function adjArmPose(pose, key, delta) {
+  ARM_POSE[pose][key] = Math.round((ARM_POSE[pose][key] + delta) * 100) / 100;
+  const el = document.getElementById(`ap_${pose}_${key}`);
+  if (el) el.textContent = ARM_POSE[pose][key].toFixed(2);
+  // If currently testing this pose, apply immediately
+  if (currentTestPose === pose) testArmPose(pose);
+  // If adjusting table pose, also update TABLE_ARM_POSE
+  if (pose === 'table') {
+    TABLE_ARM_POSE.shoulderR.y = ARM_POSE.table.shY;
+    TABLE_ARM_POSE.shoulderL.y = ARM_POSE.table.shY;
+    TABLE_ARM_POSE.elbowR.y = ARM_POSE.table.elY;
+    TABLE_ARM_POSE.elbowL.y = ARM_POSE.table.elY;
+  }
+}
+function testArmPose(poseName) {
+  currentTestPose = poseName;
+  const pose = ARM_POSE[poseName];
   for (let i = 0; i < 6; i++) {
     if (seatAnimData[i] && seatAnimData[i].state === WSTATE.SEATED && seatMannequins[i]) {
       const j = seatMannequins[i].joints;
+      j.shoulderR.rotation.x = pose.shX;
+      j.shoulderR.rotation.y = pose.shY;
+      j.elbowR.rotation.x = pose.elX;
+      j.elbowR.rotation.y = pose.elY;
+      // Left arm stays at table pose
+      j.shoulderL.rotation.x = 0;
       j.shoulderL.rotation.y = TABLE_ARM_POSE.shoulderL.y;
-      j.shoulderR.rotation.y = TABLE_ARM_POSE.shoulderR.y;
+      j.elbowL.rotation.x = 0;
       j.elbowL.rotation.y = TABLE_ARM_POSE.elbowL.y;
-      j.elbowR.rotation.y = TABLE_ARM_POSE.elbowR.y;
     }
   }
+  buildArmPoseUI();
 }
 
 // ========== STATION SETUP (Chairs + Animated Mannequins) ==========
@@ -1417,52 +1451,132 @@ function playDomino(dom) {
   dom.userData.played = true;
 
   const seat = dom.userData.seat;
-  const spot = playSpots[seat];
 
-  // Get current world position/rotation before reparenting
-  const { pos: startPos, quat: startQuat } = getWorldTransform(dom);
-
-  // Reparent to scene so we can animate in world coords
-  dom.parent.remove(dom);
-  scene.add(dom);
-  dom.position.copy(startPos);
-  dom.quaternion.copy(startQuat);
-
-  // Mid-point: risen above rack, same XY
-  const midPos = startPos.clone();
-  midPos.z += RISE_HEIGHT;
-
-  // Target: flat on table at play spot, face up
-  const endPos = new THREE.Vector3(spot.x, spot.y, spot.z);
-  const endEuler = new THREE.Euler(0, 0, spot.rotZ, 'XYZ');
-  const endQuat = new THREE.Quaternion().setFromEuler(endEuler);
-
-  playedDominoes.push({
-    dom, startPos: startPos.clone(), startQuat: startQuat.clone(),
-    startScale: dom.scale.clone(),
-    endScale: new THREE.Vector3(playScale, playScale, playScale),
-    midPos, endPos, endQuat, t: 0, phase: 'rise', done: false
-  });
-
-  // Trigger arm animation for the playing seat
-  triggerArmPlay(seat);
+  // Trigger the full arm animation — it will handle the domino
+  triggerArmPlay(seat, dom);
 }
 
-// === ARM PLAY ANIMATION ===
-// When a domino is played, the player's right arm reaches out then returns to table
-const armAnims = []; // active arm animations
+// === ARM PLAY ANIMATION (multi-axis, multi-phase) ===
+// Phases: reach → grab → lift → throw → return
+// During grab→throw, domino is attached to hand
+const armAnims = [];
 
-function triggerArmPlay(seatIdx) {
+// Arm pose keyframes (shoulder & elbow, x and y axes)
+const ARM_POSE = {
+  table: {   // resting on table
+    shX: 0, shY: TABLE_ARM_POSE.shoulderR.y,
+    elX: 0, elY: TABLE_ARM_POSE.elbowR.y
+  },
+  reach: {   // hand reaching down to rack
+    shX: 0.3, shY: TABLE_ARM_POSE.shoulderR.y + 0.6,
+    elX: 0,   elY: TABLE_ARM_POSE.elbowR.y + 1.2
+  },
+  lift: {    // arm raised with domino
+    shX: 0.15, shY: TABLE_ARM_POSE.shoulderR.y - 0.3,
+    elX: 0,    elY: TABLE_ARM_POSE.elbowR.y + 0.4
+  },
+  throw: {   // arm extended forward, releasing domino toward table center
+    shX: 0, shY: TABLE_ARM_POSE.shoulderR.y - 0.5,
+    elX: 0, elY: TABLE_ARM_POSE.elbowR.y + 0.8
+  }
+};
+
+function triggerArmPlay(seatIdx, dom) {
   // Remove any existing animation for this seat
   const existing = armAnims.findIndex(a => a.seat === seatIdx);
   if (existing >= 0) armAnims.splice(existing, 1);
 
   armAnims.push({
     seat: seatIdx,
+    dom: dom,           // the domino to pick up
     t: 0,
-    phase: 'reach', // reach -> hold -> return
-    dur: 0.5 // total time for each phase
+    phase: 'reach',     // reach → grab → lift → throw → return
+    attached: false,    // whether domino is attached to hand
+    durations: { reach: 0.35, grab: 0.1, lift: 0.3, throw: 0.25, return: 0.4 }
   });
+}
+
+function setArmPose(j, pose, ease, fromPose) {
+  j.shoulderR.rotation.x = fromPose.shX + (pose.shX - fromPose.shX) * ease;
+  j.shoulderR.rotation.y = fromPose.shY + (pose.shY - fromPose.shY) * ease;
+  j.elbowR.rotation.x = fromPose.elX + (pose.elX - fromPose.elX) * ease;
+  j.elbowR.rotation.y = fromPose.elY + (pose.elY - fromPose.elY) * ease;
+}
+
+function snapArmPose(j, pose) {
+  j.shoulderR.rotation.x = pose.shX;
+  j.shoulderR.rotation.y = pose.shY;
+  j.elbowR.rotation.x = pose.elX;
+  j.elbowR.rotation.y = pose.elY;
+}
+
+function attachDomToHand(a) {
+  if (a.attached || !a.dom) return;
+  const m = seatMannequins[a.seat];
+  const hand = m.joints.handR;
+
+  // Get domino's current world transform
+  scene.updateMatrixWorld(true);
+  const domWorldPos = new THREE.Vector3();
+  const domWorldQuat = new THREE.Quaternion();
+  a.dom.getWorldPosition(domWorldPos);
+  a.dom.getWorldQuaternion(domWorldQuat);
+
+  // Get hand's inverse world matrix to compute local offset
+  const handWorldMat = new THREE.Matrix4();
+  hand.updateMatrixWorld(true);
+  handWorldMat.copy(hand.matrixWorld).invert();
+
+  // Reparent: remove from current parent, add to hand
+  if (a.dom.parent) a.dom.parent.remove(a.dom);
+  hand.add(a.dom);
+
+  // Set local position/rotation relative to hand
+  const localPos = domWorldPos.applyMatrix4(handWorldMat);
+  a.dom.position.copy(localPos);
+  const handWorldQuat = new THREE.Quaternion();
+  hand.getWorldQuaternion(handWorldQuat);
+  handWorldQuat.invert();
+  a.dom.quaternion.copy(handWorldQuat.multiply(domWorldQuat));
+
+  a.attached = true;
+}
+
+function releaseDomFromHand(a) {
+  if (!a.attached || !a.dom) return;
+
+  // Get current world transform while still parented to hand
+  scene.updateMatrixWorld(true);
+  const worldPos = new THREE.Vector3();
+  const worldQuat = new THREE.Quaternion();
+  a.dom.getWorldPosition(worldPos);
+  a.dom.getWorldQuaternion(worldQuat);
+
+  // Reparent to scene
+  if (a.dom.parent) a.dom.parent.remove(a.dom);
+  scene.add(a.dom);
+  a.dom.position.copy(worldPos);
+  a.dom.quaternion.copy(worldQuat);
+
+  // Now animate the domino flying to the play spot
+  const seat = a.dom.userData.seat;
+  const spot = playSpots[seat];
+  const endPos = new THREE.Vector3(spot.x, spot.y, spot.z);
+  const endEuler = new THREE.Euler(0, 0, spot.rotZ, 'XYZ');
+  const endQuat = new THREE.Quaternion().setFromEuler(endEuler);
+
+  playedDominoes.push({
+    dom: a.dom,
+    startPos: worldPos.clone(),
+    startQuat: worldQuat.clone(),
+    startScale: a.dom.scale.clone(),
+    endScale: new THREE.Vector3(playScale, playScale, playScale),
+    midPos: worldPos.clone(), // no separate rise — already lifted
+    endPos, endQuat,
+    t: 0, phase: 'fly', done: false  // skip rise phase, go straight to fly
+  });
+
+  a.attached = false;
 }
 
 function updateArmAnims(dt) {
@@ -1474,28 +1588,47 @@ function updateArmAnims(dt) {
     if (!m || seatAnimData[a.seat].state < WSTATE.SETTLING) continue;
     const j = m.joints;
     a.t += dt;
+    const dur = a.durations[a.phase];
+    const t = Math.min(a.t / dur, 1);
+    const ease = easeIO(t);
 
-    // Arm reach pose: right arm extends forward to pick up/place domino
-    const reachShoulder = TABLE_ARM_POSE.shoulderR.y - 0.4;  // reach further forward
-    const reachElbow = TABLE_ARM_POSE.elbowR.y + 0.5;        // forearm extends out more
-    const tableShoulder = TABLE_ARM_POSE.shoulderR.y;
-    const tableElbow = TABLE_ARM_POSE.elbowR.y;
+    switch (a.phase) {
+      case 'reach':
+        // Arm reaches down toward the domino rack
+        setArmPose(j, ARM_POSE.reach, ease, ARM_POSE.table);
+        if (t >= 1) { a.phase = 'grab'; a.t = 0; }
+        break;
 
-    if (a.phase === 'reach') {
-      const t = Math.min(a.t / a.dur, 1);
-      const ease = easeIO(t);
-      j.shoulderR.rotation.y = tableShoulder + (reachShoulder - tableShoulder) * ease;
-      j.elbowR.rotation.y = tableElbow + (reachElbow - tableElbow) * ease;
-      if (t >= 1) { a.phase = 'hold'; a.t = 0; }
-    } else if (a.phase === 'hold') {
-      // Brief hold at extended position
-      if (a.t >= 0.3) { a.phase = 'return'; a.t = 0; }
-    } else if (a.phase === 'return') {
-      const t = Math.min(a.t / a.dur, 1);
-      const ease = easeIO(t);
-      j.shoulderR.rotation.y = reachShoulder + (tableShoulder - reachShoulder) * ease;
-      j.elbowR.rotation.y = reachElbow + (tableElbow - reachElbow) * ease;
-      if (t >= 1) { armAnims.splice(i, 1); }
+      case 'grab':
+        // Brief pause — attach domino to hand
+        snapArmPose(j, ARM_POSE.reach);
+        if (!a.attached) attachDomToHand(a);
+        if (t >= 1) { a.phase = 'lift'; a.t = 0; }
+        break;
+
+      case 'lift':
+        // Raise arm up with domino attached
+        setArmPose(j, ARM_POSE.lift, ease, ARM_POSE.reach);
+        if (t >= 1) { a.phase = 'throw'; a.t = 0; }
+        break;
+
+      case 'throw':
+        // Swing arm forward and release domino
+        setArmPose(j, ARM_POSE.throw, ease, ARM_POSE.lift);
+        if (t >= 0.6 && a.attached) {
+          releaseDomFromHand(a);
+        }
+        if (t >= 1) { a.phase = 'return'; a.t = 0; }
+        break;
+
+      case 'return':
+        // Return arm to table resting pose
+        setArmPose(j, ARM_POSE.table, ease, ARM_POSE.throw);
+        if (t >= 1) {
+          snapArmPose(j, ARM_POSE.table);
+          armAnims.splice(i, 1);
+        }
+        break;
     }
   }
 }
@@ -2263,10 +2396,17 @@ function animate() {
         anim.phase = 'fly';
         anim.flyStart = anim.midPos.clone();
         anim.flyQuatStart = anim.startQuat.clone();
+        anim.flyBaseT = anim.t;
       }
-    } else {
-      // Phase 2: fly from mid to play spot, rotating to flat, scaling
-      const flyT = Math.min((anim.t - 0.3) / 0.7, 1);
+    } else if (anim.phase === 'fly') {
+      // Phase 2: fly from current pos to play spot, rotating to flat, scaling
+      if (!anim.flyStart) {
+        // Came directly from arm throw — no rise phase
+        anim.flyStart = anim.startPos.clone();
+        anim.flyQuatStart = anim.startQuat.clone();
+        anim.flyBaseT = 0;
+      }
+      const flyT = Math.min((anim.t - (anim.flyBaseT || 0)) / 0.7, 1);
       const eased = 1 - Math.pow(1 - flyT, 3);
       anim.dom.position.lerpVectors(anim.flyStart, anim.endPos, eased);
       anim.dom.quaternion.slerpQuaternions(anim.flyQuatStart, anim.endQuat, eased);
