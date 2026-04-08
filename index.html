@@ -2528,38 +2528,51 @@ function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
 
-  if (isLocked && !introMode) {
-    const speed = walkSpeed * (moveState.sprint ? 2.5 : 1) * delta;
+  // --- Camera anchored to player head, WASD offsets spring back ---
+  if (!introMode) {
+    // Get player's head world position as anchor
+    const fpM = seatMannequins[FP_SEAT];
+    if (fpM) {
+      scene.updateMatrixWorld(true);
+      const headAnchor = new THREE.Vector3();
+      fpM.joints.head.getWorldPosition(headAnchor);
 
-    // Forward direction on ground plane (XY only, ignore pitch)
-    const fwdX = Math.cos(yaw);
-    const fwdY = Math.sin(yaw);
-    // Right direction (perpendicular on ground)
-    const rightX = Math.cos(yaw - Math.PI / 2);
-    const rightY = Math.sin(yaw - Math.PI / 2);
+      // WASD movement adds temporary offset
+      if (isLocked) {
+        const speed = walkSpeed * (moveState.sprint ? 2.5 : 1) * delta;
+        const fwdX = Math.cos(yaw), fwdY = Math.sin(yaw);
+        const rightX = Math.cos(yaw - Math.PI / 2), rightY = Math.sin(yaw - Math.PI / 2);
 
-    let moveX = 0, moveY = 0;
-    if (moveState.forward)  { moveX += fwdX; moveY += fwdY; }
-    if (moveState.backward) { moveX -= fwdX; moveY -= fwdY; }
-    if (moveState.left)     { moveX -= rightX; moveY -= rightY; }
-    if (moveState.right)    { moveX += rightX; moveY += rightY; }
+        let moveX = 0, moveY = 0;
+        if (moveState.forward)  { moveX += fwdX; moveY += fwdY; }
+        if (moveState.backward) { moveX -= fwdX; moveY -= fwdY; }
+        if (moveState.left)     { moveX -= rightX; moveY -= rightY; }
+        if (moveState.right)    { moveX += rightX; moveY += rightY; }
 
-    // Normalize diagonal movement
-    const len = Math.sqrt(moveX * moveX + moveY * moveY);
-    if (len > 0) {
-      camera.position.x += (moveX / len) * speed;
-      camera.position.y += (moveY / len) * speed;
+        const len = Math.sqrt(moveX * moveX + moveY * moveY);
+        if (len > 0) {
+          camera.position.x += (moveX / len) * speed;
+          camera.position.y += (moveY / len) * speed;
+        }
+        if (moveState.up) camera.position.z += speed;
+        if (moveState.down) camera.position.z -= speed;
+      }
+
+      // Spring camera back toward head anchor (soft tether)
+      const isMoving = moveState.forward || moveState.backward || moveState.left || moveState.right || moveState.up || moveState.down;
+      // When not moving, gently pull back to head; when moving, weaker pull
+      const pullStrength = isMoving ? 0.5 : 3.0;
+      const cDt = Math.min(delta, 0.05);
+      camera.position.x += (headAnchor.x - camera.position.x) * pullStrength * cDt;
+      camera.position.y += (headAnchor.y - camera.position.y) * pullStrength * cDt;
+      camera.position.z += (headAnchor.z - camera.position.z) * pullStrength * cDt;
+
+      // Room bounds
+      const margin = 100;
+      camera.position.x = Math.max(-ROOM_W/2 + margin, Math.min(ROOM_W/2 - margin, camera.position.x));
+      camera.position.y = Math.max(-ROOM_D/2 + margin, Math.min(ROOM_D/2 - margin, camera.position.y));
+      camera.position.z = Math.max(FLOOR_Z_ACTUAL + 100, Math.min(FLOOR_Z_ACTUAL + ROOM_H - 50, camera.position.z));
     }
-
-    // Raise/lower perspective
-    if (moveState.up) camera.position.z += speed;
-    if (moveState.down) camera.position.z -= speed;
-
-    // Room bounds
-    const margin = 100;
-    camera.position.x = Math.max(-ROOM_W/2 + margin, Math.min(ROOM_W/2 - margin, camera.position.x));
-    camera.position.y = Math.max(-ROOM_D/2 + margin, Math.min(ROOM_D/2 - margin, camera.position.y));
-    camera.position.z = Math.max(FLOOR_Z_ACTUAL + 100, Math.min(FLOOR_Z_ACTUAL + ROOM_H - 50, camera.position.z));
   }
 
   // ========== WALK-IN ANIMATION UPDATE ==========
