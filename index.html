@@ -1615,13 +1615,18 @@ function attachDomToHand(a) {
   if (a.dom.parent) a.dom.parent.remove(a.dom);
   hand.add(a.dom);
 
-  // Set local position/rotation relative to hand
+  // Set local position/rotation/scale relative to hand
   const localPos = domWorldPos.applyMatrix4(handWorldMat);
   a.dom.position.copy(localPos);
   const handWorldQuat = new THREE.Quaternion();
   hand.getWorldQuaternion(handWorldQuat);
   handWorldQuat.invert();
   a.dom.quaternion.copy(handWorldQuat.multiply(domWorldQuat));
+
+  // Compensate for station scale so domino doesn't enlarge
+  const handWorldScale = new THREE.Vector3();
+  hand.getWorldScale(handWorldScale);
+  a.dom.scale.set(1 / handWorldScale.x, 1 / handWorldScale.y, 1 / handWorldScale.z);
 
   a.attached = true;
 }
@@ -1641,6 +1646,7 @@ function releaseDomFromHand(a) {
   scene.add(a.dom);
   a.dom.position.copy(worldPos);
   a.dom.quaternion.copy(worldQuat);
+  a.dom.scale.set(1, 1, 1); // reset scale after leaving hand hierarchy
 
   // Now animate the domino flying to the play spot
   const seat = a.dom.userData.seat;
