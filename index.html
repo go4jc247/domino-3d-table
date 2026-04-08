@@ -2329,10 +2329,11 @@ function animate() {
   // Update arm play animations
   updateArmAnims(Math.min(delta, 0.05));
 
-  // Process play queue — play next domino after current one lands
+  // Process play queue — play next domino after current arm anim + fly finishes
   if (playQueue.length > 0) {
-    const allDone = playedDominoes.every(a => a.done);
-    if (allDone) {
+    const armsDone = armAnims.length === 0;
+    const allFlown = playedDominoes.every(a => a.done);
+    if (armsDone && allFlown) {
       const nextDom = playQueue.shift();
       playDomino(nextDom);
     }
@@ -2340,8 +2341,9 @@ function animate() {
 
   // Check if all 6 played and landed — start trick collection
   if (!trickCollecting && playQueue.length === 0 && currentTrickDoms.length === 6) {
+    const armsDone2 = armAnims.length === 0;
     const allLanded = playedDominoes.every(a => a.done);
-    if (allLanded) {
+    if (armsDone2 && allLanded) {
       startTrickCollection();
     }
   }
