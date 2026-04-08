@@ -100,10 +100,9 @@ let yaw = 62 * Math.PI / 180;   // horizontal angle
 let pitch = -31 * Math.PI / 180; // vertical angle
 const PITCH_MAX = Math.PI / 2 - 0.05;
 
-// Pointer lock
-document.body.addEventListener('click', (e) => {
+// Pointer lock — only when clicking the canvas itself, not UI elements
+renderer.domElement.addEventListener('click', (e) => {
   if (!isLocked) {
-    // On desktop: try pointer lock. On iOS this is a no-op anyway.
     renderer.domElement.requestPointerLock();
   }
 });
