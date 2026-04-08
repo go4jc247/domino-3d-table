@@ -2749,24 +2749,24 @@ function animate() {
       fpM.joints.head.getWorldPosition(headWorldPos);
       camera.position.copy(headWorldPos);
 
+      // Determine where we WANT to look
       const fpAd = seatAnimData[FP_SEAT];
+      let desiredLookTarget = new THREE.Vector3(0, 0, 50); // default: table center
       if (fpAd.state < WSTATE.SETTLING) {
-        // During our walk/sit: look toward the table center, slightly downward
-        const lookTarget = new THREE.Vector3(0, 0, 50); // table surface ~Z=0
-        camera.lookAt(lookTarget);
-      } else {
-        // We're seated — watch the currently active walker
-        if (activeWalker >= 0 && activeWalker !== FP_SEAT) {
-          const targetM = seatMannequins[activeWalker];
-          const targetPos = new THREE.Vector3();
-          targetM.joints.body.getWorldPosition(targetPos);
-          // Smoothly track the active walker's body
-          camera.lookAt(targetPos);
-        } else {
-          // No active walker — look at table center
-          camera.lookAt(0, 0, 50);
-        }
+        desiredLookTarget.set(0, 0, 50);
+      } else if (activeWalker >= 0 && activeWalker !== FP_SEAT) {
+        const targetM = seatMannequins[activeWalker];
+        targetM.joints.body.getWorldPosition(desiredLookTarget);
       }
+
+      // Smooth interpolation — no snapping
+      if (!window._introLookTarget) {
+        window._introLookTarget = desiredLookTarget.clone();
+      }
+      // Lerp speed: ~2-3 seconds to fully track a new target
+      const lerpSpeed = 1.8 * Math.min(delta, 0.05);
+      window._introLookTarget.lerp(desiredLookTarget, lerpSpeed);
+      camera.lookAt(window._introLookTarget);
     }
 
     // Check if all seated — end intro
