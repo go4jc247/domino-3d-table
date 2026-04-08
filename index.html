@@ -1906,9 +1906,11 @@ function updateCharacterBehaviors(dt) {
     const breathCycle = cs.breathPhase % (Math.PI * 2);
     let breathVal;
     if (breathCycle < Math.PI * 0.6) {
-      breathVal = Math.sin(breathCycle / 0.6 * Math.PI * 0.5);
+      // Inhale: 0→1 over 30% of cycle. Normalize to 0-1, then sin(t*π/2)
+      breathVal = Math.sin(breathCycle / 1.2);             // sin(0)=0 → sin(π/2)=1
     } else {
-      breathVal = Math.cos((breathCycle - Math.PI * 0.6) / 1.4 * Math.PI * 0.5);
+      // Exhale: 1→0 over 70% of cycle. Normalize to 0-1, then cos(t*π/2)
+      breathVal = Math.cos((breathCycle - Math.PI * 0.6) / 2.8); // cos(0)=1 → cos(π/2)=0
     }
     // Occasional deeper "sigh" breath (~2x amplitude)
     cs.sighTimer -= dt;
@@ -2703,6 +2705,35 @@ function animate() {
           if (t >= 1) {
             ad.state = WSTATE.SEATED;
             ad.timer = 0;
+            // Initialize behavior springs to match current joint positions
+            // so there's no snap when behaviors take over
+            const cs = charState[i];
+            if (cs) {
+              const ch = cs.ch;
+              ch.headX.current = j.head.rotation.x || 0;
+              ch.headX.target  = j.head.rotation.x || 0;
+              ch.headY.current = j.head.rotation.y || 0;
+              ch.headY.target  = j.head.rotation.y || 0;
+              ch.headZ.current = j.head.rotation.z || 0;
+              ch.headZ.target  = j.head.rotation.z || 0;
+              ch.bodyY.current = j.body.rotation.y || 0.06;
+              ch.bodyY.target  = j.body.rotation.y || 0.06;
+              ch.bodyX.current = j.body.rotation.x || 0;
+              ch.bodyX.target  = j.body.rotation.x || 0;
+              ch.shLX.current  = j.shoulderL.rotation.x || 0;
+              ch.shLX.target   = 0;
+              ch.shLY.current  = j.shoulderL.rotation.y;
+              ch.shLY.target   = j.shoulderL.rotation.y;
+              ch.elLY.current  = j.elbowL.rotation.y;
+              ch.elLY.target   = j.elbowL.rotation.y;
+              // Zero all velocities
+              for (const sp of Object.values(ch)) { sp.velocity = 0; }
+              // Start with a freeze, then smoothly transition to rest pose
+              cs.idleCooldown = 1.0 + Math.random() * 2.0;
+              // Gently set rest targets (springs will smoothly animate there)
+              ch.headX.target = REST_HEAD_X;
+              ch.headY.target = 0;
+            }
           }
           break;
         }
