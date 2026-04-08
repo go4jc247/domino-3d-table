@@ -1130,7 +1130,15 @@ function lerpJointPose(joints, fromPose, toPose, t) {
 // ========== WALK-IN STATE MACHINE ==========
 const WSTATE = {
   WAITING: -1, WALKING: 0, STOPPING: 1, PULLING_CHAIR: 2,
-  SIDESTEPPING: 3, SITTING: 4, PUSHING_IN: 5, SEATED: 6
+  SIDESTEPPING: 3, SITTING: 4, PUSHING_IN: 5, SETTLING: 6, SEATED: 7
+};
+
+// Arms-on-table pose (blended from seated pose after push-in)
+const TABLE_ARM_POSE = {
+  shoulderL: { y: 0.85 },  // arms forward toward table
+  shoulderR: { y: 0.85 },
+  elbowL: { y: -0.5 },     // forearms resting on table surface
+  elbowR: { y: -0.5 }
 };
 
 // Scale: walking mannequin lives at a smaller scale, we uniform-scale the station group
@@ -1783,8 +1791,8 @@ function animate() {
         continue;
       }
 
-      if (ad.state === WSTATE.SEATED) continue;
-      if (ad.state !== WSTATE.SEATED && ad.state !== WSTATE.WAITING) activeWalker = si;
+      if (ad.state === WSTATE.SEATED || ad.state === WSTATE.SETTLING) continue;
+      if (ad.state >= WSTATE.WALKING && ad.state <= WSTATE.PUSHING_IN) activeWalker = si;
 
       switch (ad.state) {
         case WSTATE.WAITING: {
@@ -1882,6 +1890,26 @@ function animate() {
             ch.position.x = endX;
             m.position.x = endFeetX;
             j.body.position.x = 0;
+            ad.state = WSTATE.SETTLING;
+            ad.timer = 0;
+            // Save current arm rotations for blend start
+            ad.armFromL = j.shoulderL.rotation.y;
+            ad.armFromR = j.shoulderR.rotation.y;
+            ad.elbFromL = j.elbowL.rotation.y;
+            ad.elbFromR = j.elbowR.rotation.y;
+          }
+          break;
+        }
+        case WSTATE.SETTLING: {
+          // Blend arms from seated pose to table-resting pose
+          ad.timer += wDt;
+          const t = Math.min(ad.timer / 0.8, 1);
+          const ease = easeIO(t);
+          j.shoulderL.rotation.y = ad.armFromL + (TABLE_ARM_POSE.shoulderL.y - ad.armFromL) * ease;
+          j.shoulderR.rotation.y = ad.armFromR + (TABLE_ARM_POSE.shoulderR.y - ad.armFromR) * ease;
+          j.elbowL.rotation.y = ad.elbFromL + (TABLE_ARM_POSE.elbowL.y - ad.elbFromL) * ease;
+          j.elbowR.rotation.y = ad.elbFromR + (TABLE_ARM_POSE.elbowR.y - ad.elbFromR) * ease;
+          if (t >= 1) {
             ad.state = WSTATE.SEATED;
             ad.timer = 0;
           }
@@ -1900,7 +1928,7 @@ function animate() {
       camera.position.copy(headWorldPos);
 
       const fpAd = seatAnimData[FP_SEAT];
-      if (fpAd.state < WSTATE.SEATED) {
+      if (fpAd.state < WSTATE.SETTLING) {
         // During our walk/sit: look toward the table center, slightly downward
         const lookTarget = new THREE.Vector3(0, 0, 50); // table surface ~Z=0
         camera.lookAt(lookTarget);
