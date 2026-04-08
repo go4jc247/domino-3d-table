@@ -823,308 +823,389 @@ const chandelier = createChandelier();
 chandelier.position.z = 1000;
 scene.add(chandelier);
 
-// ========== MANNEQUIN ==========
-function createMannequin(seatIndex) {
-  const mGroup = new THREE.Group();
+// ========== ARTICULATED MANNEQUIN (Country/Western) ==========
+const skinTones = [0xD2A77C, 0x8D5524, 0xC68642, 0xE0AC69, 0x6B4226, 0xF1C27D];
+const shirtColors = [0x8B4513, 0xcc2222, 0x2255aa, 0x2a5a2a, 0xcc8844, 0x884422];
+const hairColors = [0x3a2010, 0x1a1a1a, 0x8B4513, 0x554433, 0x2a1505, 0x111111];
+const pantsColors = [0x2a2a3a, 0x3a2a1a, 0x1a3a2a, 0x2a2a4a, 0x3a3a2a, 0x2a1a3a];
+const hairStyleNames = ['cowboy', 'rancher', 'trucker', 'slick', 'buzzcut', 'straw'];
 
-  const skinTones = [0xD2A77C, 0x8D5524, 0xC68642, 0xE0AC69, 0x6B4226, 0xF1C27D];
-  const shirtColors = [0x2244aa, 0xaa2233, 0x228844, 0x884488, 0xcc6622, 0x336688];
-  const hairColors = [0x1a1a1a, 0x3a2010, 0x8B4513, 0x2a1505, 0x111111, 0xb8860b];
-  const pantsColors = [0x2a2a3a, 0x3a2a1a, 0x1a3a2a, 0x2a2a4a, 0x3a3a2a, 0x2a1a3a];
-
-  const skinMat = new THREE.MeshPhongMaterial({
-    color: skinTones[seatIndex % 6], shininess: 25,
-    specular: new THREE.Color(0x222222)
-  });
-  const shirtMat = new THREE.MeshPhongMaterial({
-    color: shirtColors[seatIndex % 6], shininess: 15
-  });
-  const pantsMat = new THREE.MeshPhongMaterial({ color: pantsColors[seatIndex % 6], shininess: 10 });
+function createWalkingMannequin(charIndex) {
+  const ci = charIndex % 6;
+  const skinMat = new THREE.MeshPhongMaterial({ color: skinTones[ci], shininess: 25, specular: new THREE.Color(0x222222) });
+  const shirtMat = new THREE.MeshPhongMaterial({ color: shirtColors[ci], shininess: 15 });
+  const pantsMat = new THREE.MeshPhongMaterial({ color: pantsColors[ci], shininess: 10 });
   const shoeMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a, shininess: 30 });
-  const hairMat = new THREE.MeshPhongMaterial({ color: hairColors[seatIndex % 6], shininess: 15 });
+  const hairMat = new THREE.MeshPhongMaterial({ color: hairColors[ci], shininess: 15 });
   const eyeWhiteMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 60 });
   const pupilMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 80 });
   const lipMat = new THREE.MeshPhongMaterial({ color: 0xcc4444, shininess: 20 });
 
-  // Mannequin group at chair Z = -700. Floor at -760. Floor in local = -60.
-  // Chair seat top in local ≈ 460. Scale 1.3x applied at end.
-  // Build at 1x then scale — but hands/table positions are in world-ish coords,
-  // so I'll build at final size directly.
+  const root = new THREE.Group();
+  const joints = {};
+  const hairStyle = hairStyleNames[ci];
 
-  const S = 1.3; // scale factor
-  const floorZ = -60; // floor in local coords
-  const seatTop = 460; // chair seat surface in local
-  const hipZ = seatTop + 30 * S;
+  const footH = 15, shoeLen = 50, shinLen = 160, thighLen = 155;
+  const torsoH = 190, neckH = 25, headR = 42;
+  const shoulderW = 75, upperArmLen = 120, forearmLen = 110;
+  const hipZ = footH + shinLen + thighLen; // 330
 
-  // === TORSO ===
-  const torsoH = 320 * S;
-  const torsoGeo = new THREE.CylinderGeometry(70 * S, 95 * S, torsoH, 12);
+  // === BODY PIVOT ===
+  const bodyPivot = new THREE.Group();
+  bodyPivot.position.z = hipZ;
+  root.add(bodyPivot);
+  joints.body = bodyPivot;
+
+  // Torso
+  const torsoGeo = new THREE.CylinderGeometry(32, 42, torsoH, 12);
   torsoGeo.rotateX(Math.PI / 2);
   const torso = new THREE.Mesh(torsoGeo, shirtMat);
-  torso.position.set(0, 0, hipZ + torsoH / 2);
-  torso.rotation.y = 0.1;
-  mGroup.add(torso);
+  torso.position.z = torsoH / 2;
+  torso.castShadow = true;
+  bodyPivot.add(torso);
 
-  // === NECK ===
-  const neckZ = hipZ + torsoH;
-  const neckGeo = new THREE.CylinderGeometry(22 * S, 30 * S, 40 * S, 8);
-  neckGeo.rotateX(Math.PI / 2);
-  const neck = new THREE.Mesh(neckGeo, skinMat);
-  neck.position.set(-8, 0, neckZ + 20 * S);
-  mGroup.add(neck);
+  // Neck
+  const nkGeo = new THREE.CylinderGeometry(14, 18, neckH, 8);
+  nkGeo.rotateX(Math.PI / 2);
+  const nk = new THREE.Mesh(nkGeo, skinMat);
+  nk.position.z = torsoH + neckH / 2;
+  nk.castShadow = true;
+  bodyPivot.add(nk);
 
-  // === HEAD ===
-  const headR = 52 * S;
-  const headCX = -12, headCY = 0, headCZ = neckZ + 38 * S + headR;
-  const headGeo = new THREE.SphereGeometry(headR, 20, 16);
-  const head = new THREE.Mesh(headGeo, skinMat);
-  head.position.set(headCX, headCY, headCZ);
-  mGroup.add(head);
+  // Head group
+  const headGroup = new THREE.Group();
+  headGroup.position.z = torsoH + neckH + headR;
+  bodyPivot.add(headGroup);
+  joints.head = headGroup;
 
-  // === FACE — looking toward table (-X direction) ===
-  // Eyes
+  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(headR, 20, 16), skinMat);
+  headMesh.castShadow = true;
+  headGroup.add(headMesh);
+
+  // Face — looking in +X direction
   for (const side of [-1, 1]) {
-    // Eye white
-    const eyeGeo = new THREE.SphereGeometry(headR * 0.18, 10, 10);
-    const eye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
-    eye.position.set(headCX - headR * 0.75, headCY + side * headR * 0.3, headCZ + headR * 0.15);
-    mGroup.add(eye);
-    // Pupil
-    const pupilGeo = new THREE.SphereGeometry(headR * 0.1, 8, 8);
-    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
-    pupil.position.set(headCX - headR * 0.9, headCY + side * headR * 0.3, headCZ + headR * 0.15);
-    mGroup.add(pupil);
+    const eyeG = new THREE.SphereGeometry(headR * 0.18, 10, 10);
+    const eye = new THREE.Mesh(eyeG, eyeWhiteMat);
+    eye.position.set(headR * 0.75, side * headR * 0.3, headR * 0.15);
+    headGroup.add(eye);
+    const pupilG = new THREE.SphereGeometry(headR * 0.1, 8, 8);
+    const pupil = new THREE.Mesh(pupilG, pupilMat);
+    pupil.position.set(headR * 0.9, side * headR * 0.3, headR * 0.15);
+    headGroup.add(pupil);
   }
-  // Nose
-  const noseGeo = new THREE.ConeGeometry(headR * 0.1, headR * 0.25, 6);
-  noseGeo.rotateX(Math.PI / 2);
-  noseGeo.rotateZ(Math.PI / 2);
-  const nose = new THREE.Mesh(noseGeo, skinMat);
-  nose.position.set(headCX - headR * 0.9, 0, headCZ - headR * 0.05);
-  mGroup.add(nose);
-  // Mouth
-  const mouthGeo = new THREE.TorusGeometry(headR * 0.15, headR * 0.04, 6, 12, Math.PI);
-  const mouth = new THREE.Mesh(mouthGeo, lipMat);
-  mouth.position.set(headCX - headR * 0.78, 0, headCZ - headR * 0.3);
-  mouth.rotation.y = Math.PI / 2;
-  mouth.rotation.z = Math.PI;
-  mGroup.add(mouth);
+  const noseG = new THREE.ConeGeometry(headR * 0.1, headR * 0.25, 6);
+  noseG.rotateZ(-Math.PI / 2);
+  const noseM = new THREE.Mesh(noseG, skinMat);
+  noseM.position.set(headR * 0.92, 0, -headR * 0.05);
+  headGroup.add(noseM);
+  const mouthG = new THREE.TorusGeometry(headR * 0.15, headR * 0.04, 6, 12, Math.PI);
+  const mouthM = new THREE.Mesh(mouthG, lipMat);
+  mouthM.position.set(headR * 0.78, 0, -headR * 0.3);
+  mouthM.rotation.y = -Math.PI / 2;
+  mouthM.rotation.z = Math.PI;
+  headGroup.add(mouthM);
 
-  // === HAIR — varies by seat ===
-  const hairStyles = ['short', 'long', 'mohawk', 'bald', 'ponytail', 'curly'];
-  const hairStyle = hairStyles[seatIndex % 6];
-
-  if (hairStyle === 'short') {
-    const hGeo = new THREE.SphereGeometry(headR * 1.05, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55);
-    const hair = new THREE.Mesh(hGeo, hairMat);
-    hair.position.set(headCX, headCY, headCZ);
-    mGroup.add(hair);
-  } else if (hairStyle === 'long') {
-    const hGeo = new THREE.SphereGeometry(headR * 1.08, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6);
-    const hair = new THREE.Mesh(hGeo, hairMat);
-    hair.position.set(headCX, headCY, headCZ);
-    mGroup.add(hair);
-    // Back hair hanging down
-    const backGeo = new THREE.CylinderGeometry(headR * 0.5, headR * 0.3, headR * 1.5, 8);
-    backGeo.rotateX(Math.PI / 2);
-    const backHair = new THREE.Mesh(backGeo, hairMat);
-    backHair.position.set(headCX + headR * 0.4, 0, headCZ - headR * 0.5);
-    mGroup.add(backHair);
-  } else if (hairStyle === 'mohawk') {
-    for (let i = -3; i <= 3; i++) {
-      const mhGeo = new THREE.BoxGeometry(headR * 0.15, headR * 0.1, headR * 0.5);
-      const mh = new THREE.Mesh(mhGeo, hairMat);
-      mh.position.set(headCX + i * headR * 0.15, 0, headCZ + headR * 0.9);
-      mGroup.add(mh);
+  // === Hair & Hats — Country/Western ===
+  function addShortHair() {
+    const hG = new THREE.SphereGeometry(headR * 1.04, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.38);
+    hG.rotateX(Math.PI / 2);
+    headGroup.add(new THREE.Mesh(hG, hairMat));
+  }
+  function addSlickedHair() {
+    addShortHair();
+    const bG = new THREE.CylinderGeometry(headR * 0.45, headR * 0.25, headR * 0.9, 8);
+    bG.rotateX(Math.PI / 2);
+    const bH = new THREE.Mesh(bG, hairMat);
+    bH.position.set(-headR * 0.5, 0, -headR * 0.1);
+    headGroup.add(bH);
+  }
+  function addBuzzCut() {
+    const hG = new THREE.SphereGeometry(headR * 1.02, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.35);
+    hG.rotateX(Math.PI / 2);
+    headGroup.add(new THREE.Mesh(hG, new THREE.MeshPhongMaterial({ color: hairColors[ci], shininess: 5 })));
+  }
+  function addCowboyHat(hatColor, bandColor, brimW, crownH, tiltBack) {
+    tiltBack = tiltBack || 0;
+    const hatGroup = new THREE.Group();
+    headGroup.add(hatGroup);
+    hatGroup.rotation.y = -tiltBack;
+    const hatMat = new THREE.MeshPhongMaterial({ color: hatColor, shininess: 20, side: THREE.DoubleSide });
+    const brimBase = headR * 0.45, outerR = headR * brimW, innerR = headR * 1.08;
+    const brimDip = headR * 0.35, brimThick = headR * 0.1;
+    function saddleZ(x, y, r) {
+      if (r < innerR) return 0;
+      const t = (r - innerR) / (outerR - innerR);
+      return ((y * y - x * x) / (outerR * outerR)) * brimDip * t;
     }
-  } else if (hairStyle === 'ponytail') {
-    const hGeo = new THREE.SphereGeometry(headR * 1.05, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55);
-    const hair = new THREE.Mesh(hGeo, hairMat);
-    hair.position.set(headCX, headCY, headCZ);
-    mGroup.add(hair);
-    const tailGeo = new THREE.CylinderGeometry(headR * 0.15, headR * 0.1, headR * 1.2, 6);
-    tailGeo.rotateX(Math.PI / 2);
-    const tail = new THREE.Mesh(tailGeo, hairMat);
-    tail.position.set(headCX + headR * 0.6, 0, headCZ + headR * 0.1);
-    tail.rotation.y = 0.5;
-    mGroup.add(tail);
-  } else if (hairStyle === 'curly') {
-    for (let i = 0; i < 25; i++) {
-      const phi = Math.random() * Math.PI * 0.6;
-      const theta = Math.random() * Math.PI * 2;
-      const cGeo = new THREE.SphereGeometry(headR * 0.18, 6, 6);
-      const curl = new THREE.Mesh(cGeo, hairMat);
-      curl.position.set(
-        headCX + headR * 1.0 * Math.sin(phi) * Math.cos(theta),
-        headCY + headR * 1.0 * Math.sin(phi) * Math.sin(theta),
-        headCZ + headR * 1.0 * Math.cos(phi)
-      );
-      mGroup.add(curl);
+    const res = 24;
+    // Top brim
+    const btG = new THREE.PlaneGeometry(outerR * 2, outerR * 2, res, res);
+    const btP = btG.attributes.position;
+    for (let i = 0; i < btP.count; i++) {
+      let x = btP.getX(i), y = btP.getY(i);
+      const r = Math.sqrt(x*x + y*y), a = Math.atan2(y, x);
+      if (r > outerR) { x = outerR*Math.cos(a); y = outerR*Math.sin(a); btP.setX(i, x); btP.setY(i, y); }
+      else if (r < innerR) { x = innerR*Math.cos(a); y = innerR*Math.sin(a); btP.setX(i, x); btP.setY(i, y); }
+      btP.setZ(i, saddleZ(x, y, Math.sqrt(x*x+y*y)) + brimThick/2);
     }
+    btG.computeVertexNormals();
+    const topM = new THREE.Mesh(btG, hatMat); topM.position.z = brimBase; topM.castShadow = true;
+    hatGroup.add(topM);
+    // Bottom brim
+    const bbG = new THREE.PlaneGeometry(outerR * 2, outerR * 2, res, res);
+    const bbP = bbG.attributes.position;
+    for (let i = 0; i < bbP.count; i++) {
+      let x = bbP.getX(i), y = bbP.getY(i);
+      const r = Math.sqrt(x*x + y*y), a = Math.atan2(y, x);
+      if (r > outerR) { x = outerR*Math.cos(a); y = outerR*Math.sin(a); bbP.setX(i, x); bbP.setY(i, y); }
+      else if (r < innerR) { x = innerR*Math.cos(a); y = innerR*Math.sin(a); bbP.setX(i, x); bbP.setY(i, y); }
+      bbP.setZ(i, saddleZ(x, y, Math.sqrt(x*x+y*y)) - brimThick/2);
+    }
+    bbG.computeVertexNormals();
+    const botM = new THREE.Mesh(bbG, hatMat); botM.position.z = brimBase; botM.castShadow = true;
+    hatGroup.add(botM);
+    // Edge ring
+    const eSegs = 48, eVerts = [];
+    for (let i = 0; i <= eSegs; i++) {
+      const a = (i/eSegs)*Math.PI*2, x = outerR*Math.cos(a), y = outerR*Math.sin(a), z = saddleZ(x, y, outerR);
+      eVerts.push(x, y, z + brimThick/2, x, y, z - brimThick/2);
+    }
+    const eIdx = [];
+    for (let i = 0; i < eSegs; i++) { const a=i*2,b=a+1,c=a+2,d=a+3; eIdx.push(a,b,c,b,d,c); }
+    const eG = new THREE.BufferGeometry();
+    eG.setAttribute('position', new THREE.Float32BufferAttribute(eVerts, 3));
+    eG.setIndex(eIdx); eG.computeVertexNormals();
+    const eM = new THREE.Mesh(eG, hatMat); eM.position.z = brimBase; hatGroup.add(eM);
+    // Crown
+    const wallH = headR * crownH, crownTopR = headR * 0.7;
+    const cwG = new THREE.CylinderGeometry(crownTopR, innerR, wallH, 16);
+    cwG.rotateX(Math.PI / 2);
+    const cwM = new THREE.Mesh(cwG, hatMat); cwM.position.z = brimBase + wallH/2; cwM.castShadow = true;
+    hatGroup.add(cwM);
+    // Top cap
+    const tcG = new THREE.CylinderGeometry(crownTopR, crownTopR, headR * 0.06, 16);
+    tcG.rotateX(Math.PI / 2);
+    const tcM = new THREE.Mesh(tcG, hatMat); tcM.position.z = brimBase + wallH; hatGroup.add(tcM);
+    // Hat band
+    const bnG = new THREE.TorusGeometry(innerR * 0.98, headR * 0.05, 8, 24);
+    const bnM = new THREE.MeshPhongMaterial({ color: bandColor, shininess: 30 });
+    const bnMesh = new THREE.Mesh(bnG, bnM); bnMesh.position.z = brimBase + wallH * 0.08; hatGroup.add(bnMesh);
   }
-  // 'bald' = no hair
-
-  // === HATS & ACCESSORIES — some seats get them ===
-  if (seatIndex === 0) {
-    // Cowboy hat
-    const brimGeo = new THREE.CylinderGeometry(headR * 1.6, headR * 1.7, headR * 0.12, 20);
-    brimGeo.rotateX(Math.PI / 2);
-    const brim = new THREE.Mesh(brimGeo, new THREE.MeshPhongMaterial({ color: 0x5c3a1e, shininess: 20 }));
-    brim.position.set(headCX, headCY, headCZ + headR * 0.85);
-    mGroup.add(brim);
-    const crownGeo = new THREE.CylinderGeometry(headR * 0.65, headR * 0.75, headR * 0.7, 12);
-    crownGeo.rotateX(Math.PI / 2);
-    const crown = new THREE.Mesh(crownGeo, new THREE.MeshPhongMaterial({ color: 0x5c3a1e, shininess: 20 }));
-    crown.position.set(headCX, headCY, headCZ + headR * 1.2);
-    mGroup.add(crown);
-  } else if (seatIndex === 2) {
-    // Baseball cap
-    const capGeo = new THREE.SphereGeometry(headR * 1.08, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.4);
-    const cap = new THREE.Mesh(capGeo, new THREE.MeshPhongMaterial({ color: 0xcc2222, shininess: 25 }));
-    cap.position.set(headCX, headCY, headCZ);
-    mGroup.add(cap);
-    // Bill
-    const billGeo = new THREE.CircleGeometry(headR * 0.7, 12, 0, Math.PI);
-    const bill = new THREE.Mesh(billGeo, new THREE.MeshPhongMaterial({ color: 0xcc2222, side: THREE.DoubleSide }));
-    bill.position.set(headCX - headR * 0.85, headCY, headCZ + headR * 0.5);
-    bill.rotation.y = Math.PI / 2;
-    bill.rotation.z = -0.3;
-    mGroup.add(bill);
-  } else if (seatIndex === 5) {
-    // Fedora
-    const fbrimGeo = new THREE.CylinderGeometry(headR * 1.35, headR * 1.4, headR * 0.1, 20);
-    fbrimGeo.rotateX(Math.PI / 2);
-    const fbrim = new THREE.Mesh(fbrimGeo, new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 40 }));
-    fbrim.position.set(headCX, headCY, headCZ + headR * 0.8);
-    mGroup.add(fbrim);
-    const fcrownGeo = new THREE.CylinderGeometry(headR * 0.5, headR * 0.7, headR * 0.55, 12);
-    fcrownGeo.rotateX(Math.PI / 2);
-    const fcrown = new THREE.Mesh(fcrownGeo, new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 40 }));
-    fcrown.position.set(headCX, headCY, headCZ + headR * 1.1);
-    mGroup.add(fcrown);
+  function addBandana(color) {
+    const bMat = new THREE.MeshPhongMaterial({ color, shininess: 15 });
+    const bandM = new THREE.Mesh(new THREE.TorusGeometry(20, 5, 8, 20), bMat); bandM.position.z = torsoH + 2; bodyPivot.add(bandM);
+    const kG = new THREE.ConeGeometry(6, 18, 6); kG.rotateX(Math.PI/2); kG.rotateZ(Math.PI/2);
+    const knotM = new THREE.Mesh(kG, bMat); knotM.position.set(22, 0, torsoH - 5); bodyPivot.add(knotM);
+  }
+  function addBoloTie() {
+    const cMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 20 });
+    for (const s of [-1,1]) {
+      const cG = new THREE.CylinderGeometry(1.5,1.5,60,6); cG.rotateX(Math.PI/2);
+      const cordM = new THREE.Mesh(cG, cMat); cordM.position.set(12, s*8, torsoH-25); bodyPivot.add(cordM);
+    }
+    const mG2 = new THREE.CylinderGeometry(8,8,3,12); mG2.rotateX(Math.PI/2);
+    const mMat = new THREE.MeshPhongMaterial({ color: 0xc0c0c0, shininess: 80, specular: new THREE.Color(0xffffff) });
+    const medalM = new THREE.Mesh(mG2, mMat); medalM.position.set(12, 0, torsoH+2); bodyPivot.add(medalM);
   }
 
-  // === NECKLACE — seats 1 and 3 ===
-  if (seatIndex === 1 || seatIndex === 3) {
-    const necklaceGeo = new THREE.TorusGeometry(45 * S, 4 * S, 8, 24);
-    const necklaceMat = new THREE.MeshPhongMaterial({
-      color: seatIndex === 1 ? 0xffd700 : 0xc0c0c0,
-      shininess: 100, specular: new THREE.Color(0xffffff)
-    });
-    const necklace = new THREE.Mesh(necklaceGeo, necklaceMat);
-    necklace.position.set(-5, 0, neckZ + 5);
-    mGroup.add(necklace);
-  }
+  // Apply per-character styles
+  if (hairStyle === 'cowboy') { addShortHair(); addCowboyHat(0x5c3a1e, 0x222222, 2.0, 0.75, 0.0); addBoloTie(); }
+  else if (hairStyle === 'rancher') { addSlickedHair(); addCowboyHat(0x1a1a1a, 0x882222, 1.85, 0.6, 0.1); addBandana(0xcc2222); }
+  else if (hairStyle === 'trucker') { addBuzzCut(); addCowboyHat(0xc4a46a, 0x553311, 2.3, 0.5, 0.3); }
+  else if (hairStyle === 'slick') { addSlickedHair(); addCowboyHat(0x3a2510, 0xc0c0c0, 1.8, 0.8, 0.0); addBoloTie(); }
+  else if (hairStyle === 'buzzcut') { addBuzzCut(); addCowboyHat(0x6a6a6a, 0x222222, 1.9, 0.65, 0.2); addBandana(0x996633); }
+  else if (hairStyle === 'straw') { addShortHair(); addCowboyHat(0xd4b86a, 0x552200, 2.4, 0.45, 0.35); }
 
-  // === ARMS — chain: shoulder → upper arm → elbow → forearm → hand ===
-  const shoulderZ = hipZ + torsoH - 30 * S;
-  const shoulderSpread = 115 * S;
+  // Shoulder bridge
+  const brG = new THREE.CylinderGeometry(16, 18, shoulderW * 2, 10);
+  const bridgeM = new THREE.Mesh(brG, shirtMat); bridgeM.position.z = torsoH - 10; bodyPivot.add(bridgeM);
 
+  // === ARMS ===
   for (const side of [-1, 1]) {
-    const shX = -15, shY = side * shoulderSpread, shZ = shoulderZ;
-
-    const shoulderGeo = new THREE.SphereGeometry(32 * S, 10, 10);
-    const shoulder = new THREE.Mesh(shoulderGeo, shirtMat);
-    shoulder.position.set(shX, shY, shZ);
-    mGroup.add(shoulder);
-
-    // Elbow — above table
-    const elX = -200 * S, elY = side * 140 * S, elZ = 780;
-
-    const uArmLen = Math.sqrt((elX-shX)**2 + (elY-shY)**2 + (elZ-shZ)**2);
-    const uArmGeo = new THREE.CylinderGeometry(22 * S, 26 * S, uArmLen, 8);
-    const uArm = new THREE.Mesh(uArmGeo, shirtMat);
-    uArm.position.set((shX+elX)/2, (shY+elY)/2, (shZ+elZ)/2);
-    uArm.lookAt(new THREE.Vector3(elX, elY, elZ));
-    uArm.rotateX(Math.PI / 2);
-    mGroup.add(uArm);
-
-    const elbowGeo = new THREE.SphereGeometry(24 * S, 8, 8);
-    const elbow = new THREE.Mesh(elbowGeo, skinMat);
-    elbow.position.set(elX, elY, elZ);
-    mGroup.add(elbow);
-
-    // Hand on table, outside rack guards
-    const hdX = -365, hdY = side * 145, hdZ = 754 + 28;
-
-    const fArmLen = Math.sqrt((hdX-elX)**2 + (hdY-elY)**2 + (hdZ-elZ)**2);
-    const fArmGeo = new THREE.CylinderGeometry(18 * S, 22 * S, fArmLen, 8);
-    const fArm = new THREE.Mesh(fArmGeo, skinMat);
-    fArm.position.set((elX+hdX)/2, (elY+hdY)/2, (elZ+hdZ)/2);
-    fArm.lookAt(new THREE.Vector3(hdX, hdY, hdZ));
-    fArm.rotateX(Math.PI / 2);
-    mGroup.add(fArm);
-
-    const handGeo = new THREE.SphereGeometry(20 * S, 8, 8);
-    const hand = new THREE.Mesh(handGeo, skinMat);
-    hand.position.set(hdX, hdY, hdZ);
-    mGroup.add(hand);
+    const label = side === 1 ? 'L' : 'R';
+    const sPivot = new THREE.Group();
+    sPivot.position.set(0, side * shoulderW, torsoH - 10);
+    bodyPivot.add(sPivot);
+    joints['shoulder' + label] = sPivot;
+    sPivot.add(new THREE.Mesh(new THREE.SphereGeometry(18, 10, 10), shirtMat));
+    const uAG = new THREE.CylinderGeometry(13, 15, upperArmLen, 8);
+    uAG.rotateX(Math.PI / 2); uAG.translate(0, 0, -upperArmLen / 2);
+    sPivot.add(new THREE.Mesh(uAG, shirtMat));
+    const ePivot = new THREE.Group();
+    ePivot.position.z = -upperArmLen;
+    sPivot.add(ePivot);
+    joints['elbow' + label] = ePivot;
+    ePivot.add(new THREE.Mesh(new THREE.SphereGeometry(14, 8, 8), skinMat));
+    const fAG = new THREE.CylinderGeometry(11, 13, forearmLen, 8);
+    fAG.rotateX(Math.PI / 2); fAG.translate(0, 0, -forearmLen / 2);
+    ePivot.add(new THREE.Mesh(fAG, skinMat));
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(14, 8, 8), skinMat);
+    hand.position.z = -forearmLen;
+    ePivot.add(hand);
   }
 
-  // === LEGS — thighs flat on seat, shins down to floor ===
-  const thighLen = 280 * S;
+  // === LEGS ===
   for (const side of [-1, 1]) {
-    // Thigh — from hip forward along -X
-    const thighGeo = new THREE.CylinderGeometry(38 * S, 42 * S, thighLen, 10);
-    thighGeo.rotateX(Math.PI / 2);
-    const thigh = new THREE.Mesh(thighGeo, pantsMat);
-    thigh.position.set(-thighLen / 2 + 20, side * 80 * S, hipZ - 25 * S);
-    thigh.rotation.y = Math.PI / 2;
-    thigh.rotation.x = side * 0.04;
-    mGroup.add(thigh);
-
-    // Knee at front of thigh
-    const kneeX = -thighLen + 30;
-    const kneeY = side * 85 * S;
-    const kneeZ = hipZ - 30 * S;
-    const kneeGeo = new THREE.SphereGeometry(30 * S, 8, 8);
-    const knee = new THREE.Mesh(kneeGeo, pantsMat);
-    knee.position.set(kneeX, kneeY, kneeZ);
-    mGroup.add(knee);
-
-    // Shin — from knee down to floor
-    const footZ = floorZ + 30; // just above floor for shoe
-    const shinLen = kneeZ - footZ;
-    const shinGeo = new THREE.CylinderGeometry(26 * S, 24 * S, shinLen, 8);
-    shinGeo.rotateX(Math.PI / 2);
-    const shin = new THREE.Mesh(shinGeo, pantsMat);
-    shin.position.set(kneeX, kneeY, kneeZ - shinLen / 2);
-    mGroup.add(shin);
-
-    // Shoe on the floor
-    const shoe = new THREE.Mesh(
-      new THREE.BoxGeometry(120 * S, 60 * S, 40 * S),
-      shoeMat
-    );
-    shoe.position.set(kneeX - 25 * S, kneeY, floorZ + 20 * S);
-    mGroup.add(shoe);
+    const label = side === 1 ? 'L' : 'R';
+    const hPivot = new THREE.Group();
+    hPivot.position.set(0, side * 35, 0);
+    bodyPivot.add(hPivot);
+    joints['hip' + label] = hPivot;
+    const tG = new THREE.CylinderGeometry(25, 22, thighLen, 10);
+    tG.rotateX(Math.PI / 2); tG.translate(0, 0, -thighLen / 2);
+    hPivot.add(new THREE.Mesh(tG, pantsMat));
+    const kPivot = new THREE.Group();
+    kPivot.position.z = -thighLen;
+    hPivot.add(kPivot);
+    joints['knee' + label] = kPivot;
+    kPivot.add(new THREE.Mesh(new THREE.SphereGeometry(18, 8, 8), pantsMat));
+    const sG = new THREE.CylinderGeometry(18, 16, shinLen, 8);
+    sG.rotateX(Math.PI / 2); sG.translate(0, 0, -shinLen / 2);
+    kPivot.add(new THREE.Mesh(sG, pantsMat));
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(shoeLen, 35, footH), shoeMat);
+    shoe.position.set(shoeLen * 0.2, 0, -shinLen - footH / 2);
+    kPivot.add(shoe);
   }
 
-  return mGroup;
+  root.joints = joints;
+  root.walkPhase = 0;
+  return root;
 }
 
-// Chairs + Mannequins — at flat edges
+// ========== WALK CYCLE ANIMATION ==========
+function animateWalk(mannequin, dt, speed) {
+  const j = mannequin.joints;
+  mannequin.walkPhase += dt * speed * 3.5;
+  const t = mannequin.walkPhase;
+  const stride = 0.55, armSwing = 0.45, bobAmt = 8, leanAmt = 0.04;
+  j.body.position.z = mannequin._baseHipZ + Math.abs(Math.sin(t)) * bobAmt;
+  j.body.rotation.y = Math.sin(t) * leanAmt;
+  j.head.rotation.y = -Math.sin(t) * leanAmt * 0.5;
+  j.hipR.rotation.y = Math.sin(t) * stride;
+  j.hipL.rotation.y = Math.sin(t + Math.PI) * stride;
+  j.kneeR.rotation.y = Math.max(0, -Math.sin(t - 0.4)) * stride * 1.2;
+  j.kneeL.rotation.y = Math.max(0, -Math.sin(t + Math.PI - 0.4)) * stride * 1.2;
+  j.shoulderR.rotation.y = Math.sin(t + Math.PI) * armSwing;
+  j.shoulderL.rotation.y = Math.sin(t) * armSwing;
+  j.elbowR.rotation.y = -Math.max(0, Math.sin(t + Math.PI - 0.3)) * 0.6;
+  j.elbowL.rotation.y = -Math.max(0, Math.sin(t - 0.3)) * 0.6;
+}
+
+// ========== POSE SYSTEM ==========
+const W_HIP_Z = 330; // footH + shinLen + thighLen
+const W_CHAIR_SEAT_Z = 175;
+
+const STANDING_POSE = {
+  body: { x:0, y:0, z:0 }, head: { x:0, y:0, z:0 },
+  hipL: { y:0 }, hipR: { y:0 }, kneeL: { y:0 }, kneeR: { y:0 },
+  shoulderL: { y:0 }, shoulderR: { y:0 }, elbowL: { y:0 }, elbowR: { y:0 }
+};
+const SEATED_POSE = {
+  body: { y: 0.06 }, head: { y: -0.06 },
+  hipL: { y: -1.57 }, hipR: { y: -1.57 },
+  kneeL: { y: 1.57 }, kneeR: { y: 1.57 },
+  shoulderL: { y: -0.4 }, shoulderR: { y: -0.4 },
+  elbowL: { y: -0.5 }, elbowR: { y: -0.5 }
+};
+
+function setJointPose(joints, pose) {
+  for (const [name, rots] of Object.entries(pose)) {
+    const j = joints[name]; if (!j) continue;
+    for (const [axis, val] of Object.entries(rots)) j.rotation[axis] = val;
+  }
+}
+function lerpJointPose(joints, fromPose, toPose, t) {
+  t = Math.max(0, Math.min(1, t));
+  const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+  for (const [name, toRots] of Object.entries(toPose)) {
+    const j = joints[name]; if (!j) continue;
+    const fromRots = fromPose[name] || {};
+    for (const [axis, toVal] of Object.entries(toRots)) {
+      const fromVal = fromRots[axis] || 0;
+      j.rotation[axis] = fromVal + (toVal - fromVal) * ease;
+    }
+  }
+}
+
+// ========== WALK-IN STATE MACHINE ==========
+const WSTATE = {
+  WAITING: -1, WALKING: 0, STOPPING: 1, PULLING_CHAIR: 2,
+  SIDESTEPPING: 3, SITTING: 4, PUSHING_IN: 5, SEATED: 6
+};
+
+// Scale: walking mannequin lives at a smaller scale, we uniform-scale the station group
+const WALK_SCALE = 2.5;
+const W_WALK_START_X = 500;
+const W_BESIDE_X = 0;
+const W_BESIDE_Y = 150; // offset to side of chair
+const W_CHAIR_PULL_DIST = 150;
+const W_FEET_PLANT_X = -110;
+const W_WALK_SPEED = 200;
+
+// Player seat index 1 (60°) is "you" — first person camera
+const FP_SEAT = 1;
+let introMode = true; // true during walk-in sequence
+
+// ========== STATION SETUP (Chairs + Animated Mannequins) ==========
 const chairDist = APOTHEM + 80 + 225;
+const seatStations = [];
+const seatChairs = [];
+const seatMannequins = [];
+const seatAnimData = [];
+
+// Walk-in order: FP_SEAT (you) goes first, then others
+const walkOrder = [FP_SEAT];
+for (let i = 0; i < 6; i++) { if (i !== FP_SEAT) walkOrder.push(i); }
+const WALK_DELAY = 3.0; // seconds between each character start
+
 for (let i = 0; i < 6; i++) {
   const angle = i * 60 * Math.PI / 180;
-  const chair = createChair();
-  chair.position.set(
-    chairDist * Math.cos(angle),
-    chairDist * Math.sin(angle),
-    -LEG_HEIGHT
-  );
-  chair.rotation.z = angle;
-  scene.add(chair);
 
-  // Add mannequin in the chair
-  const mannequin = createMannequin(i);
-  mannequin.position.set(
+  // Station wrapper — positioned and rotated for this seat
+  const station = new THREE.Group();
+  station.position.set(
     chairDist * Math.cos(angle),
     chairDist * Math.sin(angle),
-    -LEG_HEIGHT
+    FLOOR_Z_ACTUAL
   );
-  mannequin.rotation.z = angle;
-  scene.add(mannequin);
+  station.rotation.z = angle;
+  station.scale.set(WALK_SCALE, WALK_SCALE, WALK_SCALE);
+  scene.add(station);
+  seatStations.push(station);
+
+  // Chair inside station (local origin)
+  const sChair = createChair();
+  // Scale chair down to match walking mannequin proportions
+  // Index.html chair is built at sh=450 scale. Walking mannequin expects ~175.
+  // Station scale handles world size, but the chair geometry needs to match mannequin.
+  // We'll scale the chair to walking.html proportions: 200/450 ≈ 0.444
+  const chairScale = 200 / 450;
+  sChair.scale.set(chairScale, chairScale, chairScale);
+  station.add(sChair);
+  seatChairs.push(sChair);
+
+  // Articulated mannequin
+  const m = createWalkingMannequin(i);
+  m.position.set(W_WALK_START_X, W_BESIDE_Y, 0);
+  m.rotation.z = Math.PI; // face -X (toward table)
+  m._baseHipZ = W_HIP_Z;
+  m.joints.body.position.z = W_HIP_Z;
+  m.joints.body.position.x = 0;
+  m.walkPhase = 0;
+  m.visible = false; // hidden until their turn
+  station.add(m);
+  seatMannequins.push(m);
+
+  // Animation data
+  const orderIdx = walkOrder.indexOf(i);
+  seatAnimData.push({
+    state: WSTATE.WAITING,
+    timer: 0,
+    delay: orderIdx * WALK_DELAY,
+    started: false,
+    chairOrigX: 0,
+    sitBodyOffsetX: 0
+  });
 }
 
 // Hands
@@ -1643,7 +1724,7 @@ function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
 
-  if (isLocked) {
+  if (isLocked && !introMode) {
     const speed = walkSpeed * (moveState.sprint ? 2.5 : 1) * delta;
 
     // Forward direction on ground plane (XY only, ignore pitch)
@@ -1675,6 +1756,177 @@ function animate() {
     camera.position.x = Math.max(-ROOM_W/2 + margin, Math.min(ROOM_W/2 - margin, camera.position.x));
     camera.position.y = Math.max(-ROOM_D/2 + margin, Math.min(ROOM_D/2 - margin, camera.position.y));
     camera.position.z = Math.max(FLOOR_Z_ACTUAL + 100, Math.min(FLOOR_Z_ACTUAL + ROOM_H - 50, camera.position.z));
+  }
+
+  // ========== WALK-IN ANIMATION UPDATE ==========
+  if (introMode) {
+    const wDt = Math.min(delta, 0.05);
+    const easeIO = t => t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+    let activeWalker = -1; // index of currently walking character (for head tracking)
+
+    for (let si = 0; si < 6; si++) {
+      const ad = seatAnimData[si];
+      const m = seatMannequins[si];
+      const ch = seatChairs[si];
+      const j = m.joints;
+
+      if (!ad.started) {
+        ad.delay -= wDt;
+        if (ad.delay <= 0) {
+          ad.started = true;
+          m.visible = true;
+        }
+        continue;
+      }
+
+      if (ad.state === WSTATE.SEATED) continue;
+      if (ad.state !== WSTATE.SEATED && ad.state !== WSTATE.WAITING) activeWalker = si;
+
+      switch (ad.state) {
+        case WSTATE.WAITING: {
+          ad.state = WSTATE.WALKING;
+          ad.timer = 0;
+          break;
+        }
+        case WSTATE.WALKING: {
+          animateWalk(m, wDt, 1.0);
+          m.position.x -= wDt * W_WALK_SPEED;
+          if (m.position.x <= W_BESIDE_X) {
+            m.position.x = W_BESIDE_X;
+            ad.state = WSTATE.STOPPING;
+            ad.timer = 0;
+          }
+          break;
+        }
+        case WSTATE.STOPPING: {
+          ad.timer += wDt;
+          const t = Math.min(ad.timer / 0.4, 1);
+          lerpJointPose(j, {}, STANDING_POSE, t);
+          j.body.position.z = W_HIP_Z;
+          j.body.position.x = 0;
+          if (t >= 1) {
+            setJointPose(j, STANDING_POSE);
+            ad.state = WSTATE.PULLING_CHAIR;
+            ad.timer = 0;
+          }
+          break;
+        }
+        case WSTATE.PULLING_CHAIR: {
+          ad.timer += wDt;
+          const t = Math.min(ad.timer / 1.0, 1);
+          const ease = easeIO(t);
+          j.shoulderL.rotation.y = 0.5 * ease;
+          j.elbowL.rotation.y = -0.4 * ease;
+          j.body.rotation.x = -0.15 * ease;
+          ch.position.x = ad.chairOrigX + W_CHAIR_PULL_DIST * ease;
+          if (t >= 1) { ad.state = WSTATE.SIDESTEPPING; ad.timer = 0; }
+          break;
+        }
+        case WSTATE.SIDESTEPPING: {
+          ad.timer += wDt;
+          const t = Math.min(ad.timer / 0.8, 1);
+          const ease = easeIO(t);
+          m.position.y = W_BESIDE_Y + (0 - W_BESIDE_Y) * ease;
+          m.position.x = W_BESIDE_X + (W_FEET_PLANT_X - W_BESIDE_X) * ease;
+          j.shoulderL.rotation.y = 0.5 * (1 - ease);
+          j.elbowL.rotation.y = -0.4 * (1 - ease);
+          j.body.rotation.x = -0.15 * (1 - ease);
+          if (t >= 1) {
+            m.position.y = 0;
+            m.position.x = W_FEET_PLANT_X;
+            setJointPose(j, STANDING_POSE);
+            j.body.position.x = 0;
+            ad.state = WSTATE.SITTING;
+            ad.timer = 0;
+          }
+          break;
+        }
+        case WSTATE.SITTING: {
+          ad.timer += wDt;
+          const t = Math.min(ad.timer / 1.2, 1);
+          const ease = easeIO(t);
+          const seatedHipZ = W_CHAIR_SEAT_Z + 20;
+          const bodyBackOffset = -(ch.position.x - W_FEET_PLANT_X);
+          j.body.position.x = bodyBackOffset * ease;
+          j.body.position.z = W_HIP_Z + (seatedHipZ - W_HIP_Z) * ease;
+          lerpJointPose(j, STANDING_POSE, SEATED_POSE, t);
+          if (t >= 1) {
+            setJointPose(j, SEATED_POSE);
+            j.body.position.z = seatedHipZ;
+            j.body.position.x = bodyBackOffset;
+            ad.state = WSTATE.PUSHING_IN;
+            ad.timer = 0;
+            ad.sitBodyOffsetX = bodyBackOffset;
+          }
+          break;
+        }
+        case WSTATE.PUSHING_IN: {
+          ad.timer += wDt;
+          const t = Math.min(ad.timer / 1.0, 1);
+          const ease = easeIO(t);
+          const startX = ad.chairOrigX + W_CHAIR_PULL_DIST;
+          const endX = ad.chairOrigX;
+          ch.position.x = startX + (endX - startX) * ease;
+          const endFeetX = endX;
+          m.position.x = W_FEET_PLANT_X + (endFeetX - W_FEET_PLANT_X) * ease;
+          j.body.position.x = ad.sitBodyOffsetX * (1 - ease);
+          j.hipL.rotation.y = SEATED_POSE.hipL.y + 0.3 * ease;
+          j.hipR.rotation.y = SEATED_POSE.hipR.y + 0.3 * ease;
+          j.kneeL.rotation.y = SEATED_POSE.kneeL.y - 0.4 * ease;
+          j.kneeR.rotation.y = SEATED_POSE.kneeR.y - 0.4 * ease;
+          if (t >= 1) {
+            ch.position.x = endX;
+            m.position.x = endFeetX;
+            j.body.position.x = 0;
+            ad.state = WSTATE.SEATED;
+            ad.timer = 0;
+          }
+          break;
+        }
+      }
+    }
+
+    // === FIRST-PERSON CAMERA (locked to player at FP_SEAT) ===
+    scene.updateMatrixWorld(true); // ensure world matrices are current
+    const fpM = seatMannequins[FP_SEAT];
+    if (fpM.visible) {
+      // Get head world position
+      const headWorldPos = new THREE.Vector3();
+      fpM.joints.head.getWorldPosition(headWorldPos);
+      camera.position.copy(headWorldPos);
+
+      const fpAd = seatAnimData[FP_SEAT];
+      if (fpAd.state < WSTATE.SEATED) {
+        // During our walk/sit: look toward the table center, slightly downward
+        const lookTarget = new THREE.Vector3(0, 0, 50); // table surface ~Z=0
+        camera.lookAt(lookTarget);
+      } else {
+        // We're seated — watch the currently active walker
+        if (activeWalker >= 0 && activeWalker !== FP_SEAT) {
+          const targetM = seatMannequins[activeWalker];
+          const targetPos = new THREE.Vector3();
+          targetM.joints.body.getWorldPosition(targetPos);
+          // Smoothly track the active walker's body
+          camera.lookAt(targetPos);
+        } else {
+          // No active walker — look at table center
+          camera.lookAt(0, 0, 50);
+        }
+      }
+    }
+
+    // Check if all seated — end intro
+    if (seatAnimData.every(ad => ad.state === WSTATE.SEATED)) {
+      introMode = false;
+      // Restore FPS camera at seated position
+      const headWorldPos = new THREE.Vector3();
+      fpM.joints.head.getWorldPosition(headWorldPos);
+      camera.position.copy(headWorldPos);
+      // Set yaw to face table center
+      const stAngle = FP_SEAT * 60 * Math.PI / 180;
+      yaw = stAngle + Math.PI; // face inward
+      pitch = -0.2; // slight downward look at table
+    }
   }
 
   // Process play queue — play next domino after current one lands
@@ -1803,15 +2055,17 @@ function animate() {
     }
   }
 
-  // Update camera look direction from yaw/pitch
-  const lookX = Math.cos(pitch) * Math.cos(yaw);
-  const lookY = Math.cos(pitch) * Math.sin(yaw);
-  const lookZ = Math.sin(pitch);
-  camera.lookAt(
-    camera.position.x + lookX,
-    camera.position.y + lookY,
-    camera.position.z + lookZ
-  );
+  // Update camera look direction from yaw/pitch (only when not in intro)
+  if (!introMode) {
+    const lookX = Math.cos(pitch) * Math.cos(yaw);
+    const lookY = Math.cos(pitch) * Math.sin(yaw);
+    const lookZ = Math.sin(pitch);
+    camera.lookAt(
+      camera.position.x + lookX,
+      camera.position.y + lookY,
+      camera.position.z + lookZ
+    );
+  }
 
   // Update camera info display
   camInfoEl.textContent = `Cam: ${Math.round(camera.position.x)}, ${Math.round(camera.position.y)}, ${Math.round(camera.position.z)} | Yaw: ${Math.round(yaw * 180 / Math.PI)}° Pitch: ${Math.round(pitch * 180 / Math.PI)}°`;
