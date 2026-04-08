@@ -1452,6 +1452,9 @@ function playDomino(dom) {
 
   const seat = dom.userData.seat;
 
+  // Trigger character reactions
+  onDominoPlayed(seat);
+
   // Trigger the full arm animation — it will handle the domino
   triggerArmPlay(seat, dom);
 }
@@ -1633,6 +1636,242 @@ function updateArmAnims(dt) {
   }
 }
 
+// ========== CHARACTER BEHAVIOR / PERSONALITY ==========
+// Each character has unique personality traits and reactive behaviors
+
+const CHARACTER_TRAITS = [];
+const PERSONALITY_NAMES = ['Calm Carl', 'Nervous Nate', 'Cocky Cal', 'Wise Walt', 'Jolly Jake', 'Steady Steve'];
+for (let i = 0; i < 6; i++) {
+  CHARACTER_TRAITS.push({
+    // Idle animation personality (randomized per character)
+    headSpeed: 0.3 + Math.random() * 0.4,      // how fast they look around
+    headRange: 0.15 + Math.random() * 0.25,     // how far they turn head
+    bodySwaySpeed: 0.15 + Math.random() * 0.2,  // body rocking speed
+    bodySwayRange: 0.02 + Math.random() * 0.03, // body rocking amount
+    fidgetFreq: 3 + Math.random() * 5,          // seconds between fidgets
+    lookAtDomFreq: 4 + Math.random() * 6,       // how often they glance at their rack
+    reactIntensity: 0.5 + Math.random() * 0.5,  // how dramatic reactions are
+    phaseOffset: Math.random() * Math.PI * 2,    // offset so they don't sync
+  });
+}
+
+// Character state
+const charState = [];
+for (let i = 0; i < 6; i++) {
+  charState.push({
+    idle: true,
+    idleTimer: 0,
+    fidgetTimer: CHARACTER_TRAITS[i].fidgetFreq * Math.random(), // stagger starts
+    lookTarget: -1,       // seat index to look at (-1 = forward/idle)
+    lookBlend: 0,         // 0-1 blend toward lookTarget
+    reaction: null,       // 'win', 'lose', 'nod', 'contemplate', 'surprise'
+    reactionTimer: 0,
+    reactionDur: 0,
+    headBaseX: 0, headBaseY: 0, headBaseZ: 0,  // idle head offsets
+    bodyBaseY: 0,  // idle body lean
+    // Left arm idle (right arm is for domino play)
+    shLBaseX: 0, shLBaseY: 0,
+  });
+}
+
+// Which seat is currently "active" (playing their domino)
+let activeSeatPlaying = -1;
+
+function getAngleBetweenSeats(from, to) {
+  // Returns head Y rotation to look from seat 'from' toward seat 'to'
+  // Seats are at 60° intervals. Relative angle in head-local space.
+  const diff = ((to - from) % 6 + 6) % 6; // 0-5
+  // Map to angle: 0=forward, 1=60° left, 2=120° left, 3=behind, 4=120° right, 5=60° right
+  const angles = [0, -0.5, -0.8, 0, 0.8, 0.5]; // approximate head turn amounts
+  return angles[diff];
+}
+
+function triggerReaction(seatIdx, type, duration) {
+  if (seatIdx === FP_SEAT) return; // don't animate first-person player
+  const cs = charState[seatIdx];
+  cs.reaction = type;
+  cs.reactionTimer = 0;
+  cs.reactionDur = duration || 1.5;
+}
+
+function triggerAllReaction(type, excludeSeat, duration) {
+  for (let i = 0; i < 6; i++) {
+    if (i !== excludeSeat) triggerReaction(i, type, duration);
+  }
+}
+
+function updateCharacterBehaviors(dt) {
+  for (let i = 0; i < 6; i++) {
+    if (i === FP_SEAT) continue; // skip first-person player
+    const ad = seatAnimData[i];
+    if (!ad || ad.state !== WSTATE.SEATED) continue;
+
+    const m = seatMannequins[i];
+    if (!m) continue;
+    const j = m.joints;
+    const tr = CHARACTER_TRAITS[i];
+    const cs = charState[i];
+    const t = cs.idleTimer;
+    cs.idleTimer += dt;
+
+    // === IDLE HEAD MOVEMENT ===
+    // Gentle looking around with personality-driven speed/range
+    const headPhase = t * tr.headSpeed + tr.phaseOffset;
+    cs.headBaseY = Math.sin(headPhase) * tr.headRange;
+    cs.headBaseX = Math.sin(headPhase * 0.7 + 1.3) * tr.headRange * 0.3; // slight nod
+    cs.headBaseZ = Math.sin(headPhase * 0.4 + 2.7) * tr.headRange * 0.15; // slight tilt
+
+    // === IDLE BODY SWAY ===
+    const swayPhase = t * tr.bodySwaySpeed + tr.phaseOffset;
+    cs.bodyBaseY = Math.sin(swayPhase) * tr.bodySwayRange;
+
+    // === LEFT ARM IDLE ===
+    // Subtle left arm shifts (right arm is for domino play)
+    cs.shLBaseX = Math.sin(t * 0.2 + tr.phaseOffset) * 0.03;
+    cs.shLBaseY = TABLE_ARM_POSE.shoulderL.y + Math.sin(t * 0.15 + tr.phaseOffset + 1) * 0.02;
+
+    // === LOOK AT ACTIVE PLAYER ===
+    let targetHeadY = cs.headBaseY;
+    if (cs.lookTarget >= 0 && cs.lookTarget !== i) {
+      const lookAngle = getAngleBetweenSeats(i, cs.lookTarget);
+      cs.lookBlend = Math.min(cs.lookBlend + dt * 3, 1);
+      targetHeadY = lookAngle * cs.lookBlend + cs.headBaseY * (1 - cs.lookBlend);
+    } else {
+      cs.lookBlend = Math.max(cs.lookBlend - dt * 2, 0);
+    }
+
+    // === FIDGET — occasional glance at own dominoes ===
+    cs.fidgetTimer -= dt;
+    if (cs.fidgetTimer <= 0) {
+      cs.fidgetTimer = tr.fidgetFreq + Math.random() * 2;
+      // Brief downward glance at rack
+      if (Math.random() < 0.6) {
+        cs.headBaseX = 0.25; // look down
+        setTimeout(() => { if (charState[i]) charState[i].headBaseX = 0; }, 800 + Math.random() * 400);
+      }
+    }
+
+    // === REACTIONS ===
+    let reactionHeadX = 0, reactionHeadY = 0, reactionBodyY = 0;
+    let reactionShLX = 0, reactionShLY = 0, reactionElLY = 0;
+
+    if (cs.reaction) {
+      cs.reactionTimer += dt;
+      const rt = cs.reactionTimer / cs.reactionDur;
+      const intensity = tr.reactIntensity;
+
+      if (rt >= 1) {
+        cs.reaction = null; // reaction done
+      } else {
+        // Smooth bell curve for reaction intensity
+        const wave = Math.sin(rt * Math.PI);
+
+        switch (cs.reaction) {
+          case 'win':
+            // Lean back, head up, left arm raises
+            reactionBodyY = -0.08 * wave * intensity;
+            reactionHeadX = -0.3 * wave * intensity;  // look up
+            reactionShLX = 0.8 * wave * intensity;    // arm up
+            reactionShLY = -0.5 * wave * intensity;
+            reactionElLY = 0.6 * wave * intensity;
+            break;
+
+          case 'lose':
+            // Slump forward, head drops
+            reactionBodyY = 0.06 * wave * intensity;
+            reactionHeadX = 0.25 * wave * intensity;  // look down
+            reactionHeadY = 0.1 * wave * (Math.random() - 0.5); // slight shake
+            break;
+
+          case 'nod':
+            // Quick approving nod
+            reactionHeadX = 0.15 * Math.sin(rt * Math.PI * 3) * intensity;
+            break;
+
+          case 'contemplate':
+            // Lean forward, look at rack
+            reactionBodyY = 0.04 * wave * intensity;
+            reactionHeadX = 0.2 * wave * intensity;
+            // Left hand to chin
+            reactionShLX = 0.5 * wave * intensity;
+            reactionShLY = -0.3 * wave * intensity;
+            reactionElLY = 1.0 * wave * intensity;
+            break;
+
+          case 'surprise':
+            // Quick lean back, head up
+            reactionBodyY = -0.05 * wave * intensity;
+            reactionHeadX = -0.2 * wave * intensity;
+            break;
+
+          case 'shrug':
+            // Both shoulders up briefly
+            reactionShLX = 0.3 * wave * intensity;
+            reactionShLY = 0.2 * wave * intensity;
+            break;
+        }
+      }
+    }
+
+    // === APPLY ALL TO JOINTS ===
+    // Head
+    j.head.rotation.x = cs.headBaseX + reactionHeadX;
+    j.head.rotation.y = targetHeadY + reactionHeadY;
+    j.head.rotation.z = cs.headBaseZ;
+
+    // Body lean (only Y to avoid messing up seated pose)
+    j.body.rotation.y = 0.06 + cs.bodyBaseY + reactionBodyY; // 0.06 is SEATED_POSE base
+
+    // Left arm (idle + reaction, don't touch right arm — that's for domino play)
+    // Only modify if no arm play anim is running on this seat
+    const hasArmAnim = armAnims.some(a => a.seat === i);
+    if (!hasArmAnim) {
+      j.shoulderL.rotation.x = cs.shLBaseX + reactionShLX;
+      j.shoulderL.rotation.y = (cs.shLBaseY || TABLE_ARM_POSE.shoulderL.y) + reactionShLY;
+      j.elbowL.rotation.y = TABLE_ARM_POSE.elbowL.y + reactionElLY;
+    }
+  }
+}
+
+// Hook into game events — trigger reactions when dominos are played
+function onDominoPlayed(seat) {
+  activeSeatPlaying = seat;
+  // Everyone looks at the player
+  for (let i = 0; i < 6; i++) {
+    charState[i].lookTarget = seat;
+  }
+  // Random chance of nod or surprise from onlookers
+  for (let i = 0; i < 6; i++) {
+    if (i === seat || i === FP_SEAT) continue;
+    if (Math.random() < 0.3) {
+      triggerReaction(i, Math.random() < 0.5 ? 'nod' : 'surprise', 0.8);
+    }
+  }
+  // Contemplate before their own turn
+  triggerReaction(seat, 'contemplate', 1.2);
+}
+
+function onTrickWon(winningSeat) {
+  triggerReaction(winningSeat, 'win', 2.0);
+  // Others react — losers slump, some shrug
+  for (let i = 0; i < 6; i++) {
+    if (i === winningSeat || i === FP_SEAT) continue;
+    if (Math.random() < 0.5) {
+      triggerReaction(i, 'lose', 1.5);
+    } else {
+      triggerReaction(i, 'shrug', 1.0);
+    }
+  }
+}
+
+function onTrickComplete() {
+  // Everyone looks forward again
+  for (let i = 0; i < 6; i++) {
+    charState[i].lookTarget = -1;
+  }
+  activeSeatPlaying = -1;
+}
+
 // ZXCVBN = play domino 1-6 from your hand (+ all other seats play sequentially)
 const playKeys = ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN'];
 let trickIndex = 0;
@@ -1796,6 +2035,11 @@ renderer.domElement.addEventListener('click', (e) => {
 function startTrickCollection() {
   trickCollecting = true;
   trickPauseTimer = 1.0; // 1 second pause before collecting
+
+  // Trigger win/lose reactions — pick a random "winner" for now
+  const winSeat = Math.floor(Math.random() * 6);
+  onTrickWon(winSeat);
+  onTrickComplete();
 
   // Calculate trick pile positions — 6 dominoes side-by-side, flat
   const cornerX = trickPileDist * Math.cos(getTrickAngle());
@@ -2328,6 +2572,9 @@ function animate() {
 
   // Update arm play animations
   updateArmAnims(Math.min(delta, 0.05));
+
+  // Update character behaviors (idle animations, reactions)
+  updateCharacterBehaviors(Math.min(delta, 0.05));
 
   // Process play queue — play next domino after current arm anim + fly finishes
   if (playQueue.length > 0) {
