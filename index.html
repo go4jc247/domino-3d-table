@@ -52,6 +52,7 @@
   <div id="copyMsg" style="font-size:11px;color:#4f4;display:none;">Copied!</div>
 </div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
+<div id="ffBadge" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#ff0;font-family:monospace;font-size:18px;font-weight:bold;pointer-events:none;text-shadow:0 0 8px rgba(255,255,0,0.6);">&#9654;&#9654; 10x</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ========== SCENE SETUP ==========
@@ -1189,6 +1190,7 @@ const W_WALK_SPEED = 200;
 // Player seat index 1 (60°) is "you" — first person camera
 const FP_SEAT = 1;
 let introMode = true; // true during walk-in sequence
+let introFF = true;   // fast-forward walk-in at 10x speed
 
 // ========== STATION SETUP (Chairs + Animated Mannequins) ==========
 const chairDist = APOTHEM + 80 + 225;
@@ -1944,7 +1946,8 @@ function animate() {
 
   // ========== WALK-IN ANIMATION UPDATE ==========
   if (introMode) {
-    const wDt = Math.min(delta, 0.05);
+    const ffSpeed = introFF ? 10 : 1;
+    const wDt = Math.min(delta, 0.05) * ffSpeed;
     const easeIO = t => t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
     let activeWalker = -1; // index of currently walking character (for head tracking)
 
@@ -2122,6 +2125,8 @@ function animate() {
     // Check if all seated — end intro
     if (seatAnimData.every(ad => ad.state === WSTATE.SEATED)) {
       introMode = false;
+      introFF = false;
+      document.getElementById('ffBadge').style.display = 'none';
       // Restore FPS camera at seated position
       const headWorldPos = new THREE.Vector3();
       fpM.joints.head.getWorldPosition(headWorldPos);
