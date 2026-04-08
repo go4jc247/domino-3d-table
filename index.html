@@ -931,14 +931,25 @@ function createWalkingMannequin(charIndex) {
 
   // Face — looking in +X direction
   for (const side of [-1, 1]) {
+    const label = side === 1 ? 'L' : 'R';
     const eyeG = new THREE.SphereGeometry(headR * 0.18, 10, 10);
     const eye = new THREE.Mesh(eyeG, eyeWhiteMat);
     eye.position.set(headR * 0.75, side * headR * 0.3, headR * 0.15);
     headGroup.add(eye);
+    joints['eye' + label] = eye;
     const pupilG = new THREE.SphereGeometry(headR * 0.1, 8, 8);
     const pupil = new THREE.Mesh(pupilG, pupilMat);
     pupil.position.set(headR * 0.9, side * headR * 0.3, headR * 0.15);
     headGroup.add(pupil);
+    joints['pupil' + label] = pupil;
+    // Eyelid — skin-colored cap over eye, scaleZ=0 when open
+    const lidG = new THREE.SphereGeometry(headR * 0.2, 10, 5, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const lid = new THREE.Mesh(lidG, skinMat);
+    lid.position.set(headR * 0.75, side * headR * 0.3, headR * 0.15);
+    lid.rotation.x = Math.PI * 0.5;
+    lid.scale.z = 0.01; // open
+    headGroup.add(lid);
+    joints['eyelid' + label] = lid;
   }
   const noseG = new THREE.ConeGeometry(headR * 0.1, headR * 0.25, 6);
   noseG.rotateZ(-Math.PI / 2);
@@ -1636,236 +1647,411 @@ function updateArmAnims(dt) {
   }
 }
 
-// ========== CHARACTER BEHAVIOR / PERSONALITY ==========
-// Each character has unique personality traits and reactive behaviors
+// ========== CHARACTER BEHAVIOR — HOLD-BURST-SETTLE HUMAN MOTION ==========
+// Real humans are ~70% frozen when seated. Movement is SUDDEN and PURPOSEFUL,
+// then they lock back into stillness. Default gaze = looking at own dominoes.
 
+// --- Spring physics (slightly underdamped for micro-overshoot) ---
+function springStep(sp, dt) {
+  const dx = sp.target - sp.current;
+  const ddx = dx * sp.stiffness - sp.velocity * sp.damping;
+  sp.velocity += ddx * dt;
+  sp.current += sp.velocity * dt;
+  // Dead-zone: if close enough and slow enough, snap to target (true stillness)
+  if (Math.abs(dx) < 0.001 && Math.abs(sp.velocity) < 0.01) {
+    sp.current = sp.target;
+    sp.velocity = 0;
+  }
+}
+function makeSpring(val, stiff, damp) {
+  return { current: val, target: val, velocity: 0, stiffness: stiff || 40, damping: damp || 10 };
+}
+
+// Resting pose: looking down at own dominoes
+const REST_HEAD_X = 0.22; // tilted down toward rack
+
+// --- Per-character personality (wider variation) ---
 const CHARACTER_TRAITS = [];
-const PERSONALITY_NAMES = ['Calm Carl', 'Nervous Nate', 'Cocky Cal', 'Wise Walt', 'Jolly Jake', 'Steady Steve'];
 for (let i = 0; i < 6; i++) {
+  const restless = 0.15 + Math.random() * 0.85; // huge range: some very calm, some fidgety
   CHARACTER_TRAITS.push({
-    // Idle animation personality (randomized per character)
-    headSpeed: 0.3 + Math.random() * 0.4,      // how fast they look around
-    headRange: 0.15 + Math.random() * 0.25,     // how far they turn head
-    bodySwaySpeed: 0.15 + Math.random() * 0.2,  // body rocking speed
-    bodySwayRange: 0.02 + Math.random() * 0.03, // body rocking amount
-    fidgetFreq: 3 + Math.random() * 5,          // seconds between fidgets
-    lookAtDomFreq: 4 + Math.random() * 6,       // how often they glance at their rack
-    reactIntensity: 0.5 + Math.random() * 0.5,  // how dramatic reactions are
-    phaseOffset: Math.random() * Math.PI * 2,    // offset so they don't sync
+    breathRate: 3.5 + Math.random() * 1.5,      // 3.5-5s per cycle (12-17 breaths/min)
+    breathDepth: 0.5 + Math.random() * 0.5,     // amplitude multiplier
+    sighInterval: 25 + Math.random() * 35,      // seconds between deeper "sigh" breaths
+    blinkInterval: 3.0 + Math.random() * 3.0,   // 3-6s between blinks
+    restlessness: restless,                       // drives freeze duration
+    reactIntensity: 0.5 + Math.random() * 0.5,
+    // Freeze durations: calm characters hold 5-9s, restless hold 2-4s
+    freezeMin: 2.0 + (1 - restless) * 3.0,      // 2-5s minimum freeze
+    freezeMax: 4.0 + (1 - restless) * 5.0,      // 4-9s maximum freeze
   });
 }
 
-// Character state
+// --- Per-character state ---
 const charState = [];
 for (let i = 0; i < 6; i++) {
+  const tr = CHARACTER_TRAITS[i];
+  // Head springs: HIGH stiffness, slightly underdamped (damping ratio ~0.75-0.8)
+  // → snappy 150-300ms head turns with tiny overshoot
+  const headStiff = 180 + Math.random() * 60;  // 180-240 (very snappy)
+  const headDamp  = 20 + Math.random() * 4;    // underdamped for overshoot
+  // Body springs: LOWER stiffness, more damped (slow, heavy)
+  const bodyStiff = 25 + Math.random() * 10;
+  const bodyDamp  = 10 + Math.random() * 3;
+  // Arm springs: medium
+  const armStiff = 40 + Math.random() * 15;
+  const armDamp  = 12 + Math.random() * 3;
+
   charState.push({
-    idle: true,
-    idleTimer: 0,
-    fidgetTimer: CHARACTER_TRAITS[i].fidgetFreq * Math.random(), // stagger starts
-    lookTarget: -1,       // seat index to look at (-1 = forward/idle)
-    lookBlend: 0,         // 0-1 blend toward lookTarget
-    reaction: null,       // 'win', 'lose', 'nod', 'contemplate', 'surprise'
-    reactionTimer: 0,
-    reactionDur: 0,
-    headBaseX: 0, headBaseY: 0, headBaseZ: 0,  // idle head offsets
-    bodyBaseY: 0,  // idle body lean
-    // Left arm idle (right arm is for domino play)
-    shLBaseX: 0, shLBaseY: 0,
+    ch: {
+      headX:  makeSpring(REST_HEAD_X, headStiff, headDamp),       // default: looking at dominoes
+      headY:  makeSpring(0, headStiff, headDamp),
+      headZ:  makeSpring(0, headStiff * 0.5, headDamp * 0.8),
+      bodyY:  makeSpring(0.06, bodyStiff, bodyDamp),
+      bodyX:  makeSpring(0, bodyStiff * 0.8, bodyDamp),
+      shLX:   makeSpring(0, armStiff, armDamp),
+      shLY:   makeSpring(TABLE_ARM_POSE.shoulderL.y, armStiff, armDamp),
+      elLY:   makeSpring(TABLE_ARM_POSE.elbowL.y, armStiff, armDamp),
+      blink:  makeSpring(0, 500, 30),  // very fast blink snap (150ms)
+    },
+    // Breathing
+    breathPhase: Math.random() * Math.PI * 2,
+    sighTimer: tr.sighInterval * (0.5 + Math.random()),
+    currentBreathDepth: 1.0,
+    // Blinking
+    blinkTimer: 1 + Math.random() * 3,
+    doubleBlink: false,
+    _blinkPhase: null,
+    // Idle action scheduler — start FROZEN
+    idleCooldown: tr.freezeMin + Math.random() * (tr.freezeMax - tr.freezeMin),
+    currentAction: null,
+    // External
+    lookTarget: -1,
   });
 }
 
-// Which seat is currently "active" (playing their domino)
 let activeSeatPlaying = -1;
 
 function getAngleBetweenSeats(from, to) {
-  // Returns head Y rotation to look from seat 'from' toward seat 'to'
-  // Seats are at 60° intervals. Relative angle in head-local space.
-  const diff = ((to - from) % 6 + 6) % 6; // 0-5
-  // Map to angle: 0=forward, 1=60° left, 2=120° left, 3=behind, 4=120° right, 5=60° right
-  const angles = [0, -0.5, -0.8, 0, 0.8, 0.5]; // approximate head turn amounts
+  const diff = ((to - from) % 6 + 6) % 6;
+  const angles = [0, -0.5, -0.8, 0, 0.8, 0.5];
   return angles[diff];
 }
 
-function triggerReaction(seatIdx, type, duration) {
-  if (seatIdx === FP_SEAT) return; // don't animate first-person player
-  const cs = charState[seatIdx];
-  cs.reaction = type;
-  cs.reactionTimer = 0;
-  cs.reactionDur = duration || 1.5;
-}
-
-function triggerAllReaction(type, excludeSeat, duration) {
-  for (let i = 0; i < 6; i++) {
-    if (i !== excludeSeat) triggerReaction(i, type, duration);
+// --- Action definitions ---
+// REST STATE: headX=REST_HEAD_X (looking at own dominoes), headY=0, everything at table pose.
+// Actions are DEPARTURES from rest. Return targets always go back to rest pose.
+function createAction(type, tr) {
+  const I = tr.reactIntensity;
+  const R = REST_HEAD_X; // resting head-down angle
+  switch (type) {
+    // --- IDLE ACTIONS (depart from domino-gazing rest pose) ---
+    case 'glanceAtPlayer': {
+      // Quick head snap to look at another player, brief hold, snap back to dominoes
+      const dir = (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.35);
+      return {
+        type, phases: [
+          { name: 'snap', dur: 0.12 + Math.random() * 0.08, targets: { headX: 0.05, headY: dir } },
+          { name: 'hold', dur: 0.5 + Math.random() * 1.5, targets: {} },
+          { name: 'back', dur: 0.15 + Math.random() * 0.10, targets: { headX: R, headY: 0 } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'glanceAtTable': {
+      // Look at center of table (played dominoes)
+      return {
+        type, phases: [
+          { name: 'look', dur: 0.10 + Math.random() * 0.06, targets: { headX: 0.10, headY: (Math.random()-0.5)*0.12 } },
+          { name: 'hold', dur: 0.8 + Math.random() * 2.0, targets: {} },
+          { name: 'back', dur: 0.12 + Math.random() * 0.08, targets: { headX: R, headY: 0 } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'studyDominoes': {
+      // Slight head tilt while studying own tiles (very subtle, barely visible)
+      const tilt = (Math.random() - 0.5) * 0.04;
+      return {
+        type, phases: [
+          { name: 'tilt', dur: 0.15, targets: { headX: R + 0.04, headZ: tilt } },
+          { name: 'study', dur: 1.5 + Math.random() * 3.0, targets: {} },
+          { name: 'back', dur: 0.2, targets: { headX: R, headZ: 0 } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'scratchHead': {
+      return {
+        type, phases: [
+          { name: 'raise',   dur: 0.3, targets: { shLX: 0.9, shLY: -0.8, elLY: -0.5, headZ: 0.06 } },
+          { name: 'scratch', dur: 0.5 + Math.random() * 0.4, targets: {}, scratch: true },
+          { name: 'lower',   dur: 0.35, targets: { shLX: 0, shLY: TABLE_ARM_POSE.shoulderL.y, elLY: TABLE_ARM_POSE.elbowL.y, headZ: 0 } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'adjustHat': {
+      return {
+        type, phases: [
+          { name: 'reach',  dur: 0.25, targets: { shLX: 0.7, shLY: -0.6, elLY: -0.8 } },
+          { name: 'adjust', dur: 0.18, targets: { headX: R - 0.04 } },
+          { name: 'settle', dur: 0.10, targets: { headX: R } },
+          { name: 'lower',  dur: 0.30, targets: { shLX: 0, shLY: TABLE_ARM_POSE.shoulderL.y, elLY: TABLE_ARM_POSE.elbowL.y } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'shiftWeight': {
+      // Very slow, almost invisible weight shift
+      const dir = (Math.random() < 0.5 ? -1 : 1) * (0.008 + Math.random() * 0.015);
+      return {
+        type, phases: [
+          { name: 'shift', dur: 1.5 + Math.random() * 1.0, targets: { bodyX: dir } },
+          { name: 'hold',  dur: 4 + Math.random() * 6, targets: {} },
+          { name: 'back',  dur: 1.2 + Math.random() * 0.8, targets: { bodyX: 0 } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    // --- REACTION ACTIONS (triggered by game events) ---
+    case 'win': {
+      return {
+        type, isReaction: true, phases: [
+          { name: 'rise', dur: 0.12, targets: { bodyY: 0.02, headX: -0.05 * I, shLX: 0.3 * I, shLY: TABLE_ARM_POSE.shoulderL.y + 0.15 } },
+          { name: 'hold', dur: 0.6, targets: {} },
+          { name: 'settle', dur: 0.5, targets: { bodyY: 0.06, headX: R, shLX: 0, shLY: TABLE_ARM_POSE.shoulderL.y, elLY: TABLE_ARM_POSE.elbowL.y } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'lose': {
+      return {
+        type, isReaction: true, phases: [
+          { name: 'slump', dur: 0.3, targets: { bodyY: 0.10, headX: R + 0.12 * I } },
+          { name: 'hold',  dur: 1.0, targets: {} },
+          { name: 'recover', dur: 0.6, targets: { bodyY: 0.06, headX: R } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'nod': {
+      return {
+        type, isReaction: true, phases: [
+          { name: 'down', dur: 0.08, targets: { headX: R + 0.12 } },
+          { name: 'up',   dur: 0.10, targets: { headX: R - 0.06 } },
+          { name: 'down2', dur: 0.07, targets: { headX: R + 0.04 } },
+          { name: 'back', dur: 0.12, targets: { headX: R } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'contemplate': {
+      return {
+        type, isReaction: true, phases: [
+          { name: 'lean', dur: 0.20, targets: { bodyY: 0.08, headX: R + 0.08 } },
+          { name: 'think', dur: 0.5, targets: {} },
+          { name: 'back', dur: 0.30, targets: { bodyY: 0.06, headX: R } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    case 'surprise': {
+      return {
+        type, isReaction: true, phases: [
+          { name: 'jolt', dur: 0.06, targets: { bodyY: 0.03, headX: R - 0.15 * I } },
+          { name: 'hold', dur: 0.2, targets: {} },
+          { name: 'settle', dur: 0.3, targets: { bodyY: 0.06, headX: R } },
+        ], phaseIdx: 0, timer: 0
+      };
+    }
+    default: return null;
   }
 }
 
+// --- Idle action picker (weighted random) ---
+// 40-55% of time looking at own dominoes = rest state (not an action!)
+// Actions are departures from domino gazing. Most common: quick glance at player or table.
+const IDLE_ACTIONS = [
+  { type: 'glanceAtPlayer',   weight: 0.25 },
+  { type: 'glanceAtTable',    weight: 0.20 },
+  { type: 'studyDominoes',    weight: 0.20 },  // subtle re-study with tiny tilt
+  { type: 'shiftWeight',      weight: 0.15 },
+  { type: 'scratchHead',      weight: 0.06 },
+  { type: 'adjustHat',        weight: 0.04 },
+];
+function pickIdleAction(tr) {
+  const totalWeight = IDLE_ACTIONS.reduce((s, a) => s + a.weight, 0);
+  let r = Math.random() * totalWeight;
+  for (const a of IDLE_ACTIONS) {
+    r -= a.weight;
+    if (r <= 0) return createAction(a.type, tr);
+  }
+  return createAction('glanceAtPlayer', tr);
+}
+
+function triggerReaction(seatIdx, type) {
+  if (seatIdx === FP_SEAT) return;
+  const cs = charState[seatIdx];
+  const tr = CHARACTER_TRAITS[seatIdx];
+  cs.currentAction = createAction(type, tr);
+}
+
+// --- Main update ---
+// Core pattern: FROZEN (only breathing+blinks) → BURST (quick action) → FROZEN
 function updateCharacterBehaviors(dt) {
   for (let i = 0; i < 6; i++) {
-    if (i === FP_SEAT) continue; // skip first-person player
+    if (i === FP_SEAT) continue;
     const ad = seatAnimData[i];
     if (!ad || ad.state !== WSTATE.SEATED) continue;
-
     const m = seatMannequins[i];
     if (!m) continue;
+
     const j = m.joints;
     const tr = CHARACTER_TRAITS[i];
     const cs = charState[i];
-    const t = cs.idleTimer;
-    cs.idleTimer += dt;
+    const ch = cs.ch;
 
-    // === IDLE HEAD MOVEMENT ===
-    // Gentle looking around with personality-driven speed/range
-    const headPhase = t * tr.headSpeed + tr.phaseOffset;
-    cs.headBaseY = Math.sin(headPhase) * tr.headRange;
-    cs.headBaseX = Math.sin(headPhase * 0.7 + 1.3) * tr.headRange * 0.3; // slight nod
-    cs.headBaseZ = Math.sin(headPhase * 0.4 + 2.7) * tr.headRange * 0.15; // slight tilt
-
-    // === IDLE BODY SWAY ===
-    const swayPhase = t * tr.bodySwaySpeed + tr.phaseOffset;
-    cs.bodyBaseY = Math.sin(swayPhase) * tr.bodySwayRange;
-
-    // === LEFT ARM IDLE ===
-    // Subtle left arm shifts (right arm is for domino play)
-    cs.shLBaseX = Math.sin(t * 0.2 + tr.phaseOffset) * 0.03;
-    cs.shLBaseY = TABLE_ARM_POSE.shoulderL.y + Math.sin(t * 0.15 + tr.phaseOffset + 1) * 0.02;
-
-    // === LOOK AT ACTIVE PLAYER ===
-    let targetHeadY = cs.headBaseY;
-    if (cs.lookTarget >= 0 && cs.lookTarget !== i) {
-      const lookAngle = getAngleBetweenSeats(i, cs.lookTarget);
-      cs.lookBlend = Math.min(cs.lookBlend + dt * 3, 1);
-      targetHeadY = lookAngle * cs.lookBlend + cs.headBaseY * (1 - cs.lookBlend);
+    // === 1. BREATHING — asymmetric inhale/exhale, occasional sigh ===
+    cs.breathPhase += dt / tr.breathRate * Math.PI * 2;
+    const breathCycle = cs.breathPhase % (Math.PI * 2);
+    let breathVal;
+    if (breathCycle < Math.PI * 0.6) {
+      breathVal = Math.sin(breathCycle / 0.6 * Math.PI * 0.5);
     } else {
-      cs.lookBlend = Math.max(cs.lookBlend - dt * 2, 0);
+      breathVal = Math.cos((breathCycle - Math.PI * 0.6) / 1.4 * Math.PI * 0.5);
     }
+    // Occasional deeper "sigh" breath (~2x amplitude)
+    cs.sighTimer -= dt;
+    if (cs.sighTimer <= 0) {
+      cs.currentBreathDepth = 1.6 + Math.random() * 0.8; // deeper breath
+      cs.sighTimer = tr.sighInterval * (0.6 + Math.random() * 0.8);
+    }
+    // Decay sigh back to normal over a few breaths
+    cs.currentBreathDepth += (1.0 - cs.currentBreathDepth) * dt * 0.5;
+    const breathAmp = 0.018 * tr.breathDepth * cs.currentBreathDepth;
 
-    // === FIDGET — occasional glance at own dominoes ===
-    cs.fidgetTimer -= dt;
-    if (cs.fidgetTimer <= 0) {
-      cs.fidgetTimer = tr.fidgetFreq + Math.random() * 2;
-      // Brief downward glance at rack
-      if (Math.random() < 0.6) {
-        cs.headBaseX = 0.25; // look down
-        setTimeout(() => { if (charState[i]) charState[i].headBaseX = 0; }, 800 + Math.random() * 400);
+    // === 2. BLINKING ===
+    cs.blinkTimer -= dt;
+    if (cs.blinkTimer <= 0 && !cs._blinkPhase) {
+      ch.blink.target = 1;
+      cs.doubleBlink = Math.random() < 0.15;
+      cs.blinkTimer = 0.12;
+      cs._blinkPhase = 'closing';
+    }
+    if (cs._blinkPhase === 'closing' && ch.blink.current > 0.85) {
+      ch.blink.target = 0;
+      cs._blinkPhase = 'opening';
+    }
+    if (cs._blinkPhase === 'opening' && ch.blink.current < 0.05) {
+      if (cs.doubleBlink) {
+        cs.doubleBlink = false;
+        ch.blink.target = 1;
+        cs._blinkPhase = 'closing';
+        cs.blinkTimer = 0.06;
+      } else {
+        cs._blinkPhase = null;
+        cs.blinkTimer = tr.blinkInterval * (0.7 + Math.random() * 0.6);
       }
     }
 
-    // === REACTIONS ===
-    let reactionHeadX = 0, reactionHeadY = 0, reactionBodyY = 0;
-    let reactionShLX = 0, reactionShLY = 0, reactionElLY = 0;
+    // === 3. LOOK AT TARGET (game event: watch active player) ===
+    if (cs.lookTarget >= 0 && cs.lookTarget !== i && !cs.currentAction?.isReaction) {
+      const lookY = getAngleBetweenSeats(i, cs.lookTarget);
+      ch.headX.target = 0.05; // look up from dominoes
+      ch.headY.target = lookY;
+    }
 
-    if (cs.reaction) {
-      cs.reactionTimer += dt;
-      const rt = cs.reactionTimer / cs.reactionDur;
-      const intensity = tr.reactIntensity;
+    // === 4. UPDATE CURRENT ACTION ===
+    if (cs.currentAction) {
+      const act = cs.currentAction;
+      const phase = act.phases[act.phaseIdx];
+      act.timer += dt;
 
-      if (rt >= 1) {
-        cs.reaction = null; // reaction done
-      } else {
-        // Smooth bell curve for reaction intensity
-        const wave = Math.sin(rt * Math.PI);
+      // Set spring targets on phase entry
+      if (act.timer <= dt * 1.5) {
+        for (const [key, val] of Object.entries(phase.targets)) {
+          if (ch[key]) ch[key].target = val;
+        }
+      }
 
-        switch (cs.reaction) {
-          case 'win':
-            // Lean back, head up, left arm raises
-            reactionBodyY = -0.08 * wave * intensity;
-            reactionHeadX = -0.3 * wave * intensity;  // look up
-            reactionShLX = 0.8 * wave * intensity;    // arm up
-            reactionShLY = -0.5 * wave * intensity;
-            reactionElLY = 0.6 * wave * intensity;
-            break;
+      // Scratch oscillation
+      if (phase.scratch) {
+        const scratchOsc = Math.sin(act.timer * 24) * 0.04;
+        ch.elLY.target = TABLE_ARM_POSE.elbowL.y - 0.5 + scratchOsc;
+      }
 
-          case 'lose':
-            // Slump forward, head drops
-            reactionBodyY = 0.06 * wave * intensity;
-            reactionHeadX = 0.25 * wave * intensity;  // look down
-            reactionHeadY = 0.1 * wave * (Math.random() - 0.5); // slight shake
-            break;
-
-          case 'nod':
-            // Quick approving nod
-            reactionHeadX = 0.15 * Math.sin(rt * Math.PI * 3) * intensity;
-            break;
-
-          case 'contemplate':
-            // Lean forward, look at rack
-            reactionBodyY = 0.04 * wave * intensity;
-            reactionHeadX = 0.2 * wave * intensity;
-            // Left hand to chin
-            reactionShLX = 0.5 * wave * intensity;
-            reactionShLY = -0.3 * wave * intensity;
-            reactionElLY = 1.0 * wave * intensity;
-            break;
-
-          case 'surprise':
-            // Quick lean back, head up
-            reactionBodyY = -0.05 * wave * intensity;
-            reactionHeadX = -0.2 * wave * intensity;
-            break;
-
-          case 'shrug':
-            // Both shoulders up briefly
-            reactionShLX = 0.3 * wave * intensity;
-            reactionShLY = 0.2 * wave * intensity;
-            break;
+      // Advance phase
+      if (act.timer >= phase.dur) {
+        act.phaseIdx++;
+        act.timer = 0;
+        if (act.phaseIdx >= act.phases.length) {
+          cs.currentAction = null;
+          // FREEZE: long stillness after action completes
+          cs.idleCooldown = tr.freezeMin + Math.random() * (tr.freezeMax - tr.freezeMin);
         }
       }
     }
 
-    // === APPLY ALL TO JOINTS ===
-    // Head
-    j.head.rotation.x = cs.headBaseX + reactionHeadX;
-    j.head.rotation.y = targetHeadY + reactionHeadY;
-    j.head.rotation.z = cs.headBaseZ;
+    // === 5. FREEZE SCHEDULER — long stillness, then pick action ===
+    if (!cs.currentAction) {
+      cs.idleCooldown -= dt;
+      if (cs.idleCooldown <= 0) {
+        cs.currentAction = pickIdleAction(tr);
+      }
+      // While frozen: ensure rest pose targets (looking at dominoes)
+      if (cs.lookTarget < 0) {
+        ch.headX.target = REST_HEAD_X;
+        ch.headY.target = 0;
+      }
+    }
 
-    // Body lean (only Y to avoid messing up seated pose)
-    j.body.rotation.y = 0.06 + cs.bodyBaseY + reactionBodyY; // 0.06 is SEATED_POSE base
+    // === 6. UPDATE ALL SPRINGS ===
+    for (const key of Object.keys(ch)) {
+      springStep(ch[key], dt);
+    }
 
-    // Left arm (idle + reaction, don't touch right arm — that's for domino play)
-    // Only modify if no arm play anim is running on this seat
+    // === 7. APPLY TO JOINTS ===
+    const breathOff = breathVal * breathAmp;
+
+    j.head.rotation.x = ch.headX.current;
+    j.head.rotation.y = ch.headY.current;
+    j.head.rotation.z = ch.headZ.current;
+
+    j.body.rotation.y = ch.bodyY.current;
+    j.body.rotation.x = ch.bodyX.current + breathOff * 0.3; // very subtle chest
+
+    // Arms (only if no domino arm anim running)
     const hasArmAnim = armAnims.some(a => a.seat === i);
     if (!hasArmAnim) {
-      j.shoulderL.rotation.x = cs.shLBaseX + reactionShLX;
-      j.shoulderL.rotation.y = (cs.shLBaseY || TABLE_ARM_POSE.shoulderL.y) + reactionShLY;
-      j.elbowL.rotation.y = TABLE_ARM_POSE.elbowL.y + reactionElLY;
+      j.shoulderL.rotation.x = ch.shLX.current + breathOff * 0.5;
+      j.shoulderL.rotation.y = ch.shLY.current;
+      j.elbowL.rotation.y = ch.elLY.current;
+      j.shoulderR.rotation.x = breathOff * 0.5; // mirror breathing on right
+    }
+
+    // Blinking — scale eyelids
+    if (j.eyelidL && j.eyelidR) {
+      j.eyelidL.scale.z = ch.blink.current * 0.8;
+      j.eyelidR.scale.z = ch.blink.current * 0.8;
     }
   }
 }
 
-// Hook into game events — trigger reactions when dominos are played
+// --- Game event hooks ---
 function onDominoPlayed(seat) {
   activeSeatPlaying = seat;
-  // Everyone looks at the player
   for (let i = 0; i < 6; i++) {
     charState[i].lookTarget = seat;
   }
-  // Random chance of nod or surprise from onlookers
   for (let i = 0; i < 6; i++) {
     if (i === seat || i === FP_SEAT) continue;
     if (Math.random() < 0.3) {
-      triggerReaction(i, Math.random() < 0.5 ? 'nod' : 'surprise', 0.8);
+      triggerReaction(i, Math.random() < 0.5 ? 'nod' : 'surprise');
     }
   }
-  // Contemplate before their own turn
-  triggerReaction(seat, 'contemplate', 1.2);
+  triggerReaction(seat, 'contemplate');
 }
 
 function onTrickWon(winningSeat) {
-  triggerReaction(winningSeat, 'win', 2.0);
-  // Others react — losers slump, some shrug
+  triggerReaction(winningSeat, 'win');
   for (let i = 0; i < 6; i++) {
     if (i === winningSeat || i === FP_SEAT) continue;
-    if (Math.random() < 0.5) {
-      triggerReaction(i, 'lose', 1.5);
-    } else {
-      triggerReaction(i, 'shrug', 1.0);
-    }
+    triggerReaction(i, Math.random() < 0.5 ? 'lose' : 'nod');
   }
 }
 
 function onTrickComplete() {
-  // Everyone looks forward again
   for (let i = 0; i < 6; i++) {
     charState[i].lookTarget = -1;
   }
