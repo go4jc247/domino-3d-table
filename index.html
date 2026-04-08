@@ -75,8 +75,11 @@ let pitch = -31 * Math.PI / 180; // vertical angle
 const PITCH_MAX = Math.PI / 2 - 0.05;
 
 // Pointer lock
-document.body.addEventListener('click', () => {
-  if (!isLocked) renderer.domElement.requestPointerLock();
+document.body.addEventListener('click', (e) => {
+  if (!isLocked) {
+    // On desktop: try pointer lock. On iOS this is a no-op anyway.
+    renderer.domElement.requestPointerLock();
+  }
 });
 document.addEventListener('pointerlockchange', () => {
   isLocked = document.pointerLockElement === renderer.domElement;
@@ -90,6 +93,31 @@ document.addEventListener('mousemove', (e) => {
   pitch -= e.movementY * 0.002;
   pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, pitch));
 });
+
+// Touch look (iOS) — drag to look around, tap to play domino
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let touchTotalDrag = 0, isTouchLooking = false;
+renderer.domElement.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchStartTime = Date.now();
+    touchTotalDrag = 0;
+    isTouchLooking = true;
+  }
+}, { passive: true });
+renderer.domElement.addEventListener('touchmove', (e) => {
+  if (!isTouchLooking || e.touches.length !== 1) return;
+  const dx = e.touches[0].clientX - touchStartX;
+  const dy = e.touches[0].clientY - touchStartY;
+  touchTotalDrag += Math.abs(dx) + Math.abs(dy);
+  yaw   -= dx * 0.003;
+  pitch -= dy * 0.003;
+  pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, pitch));
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  e.preventDefault();
+}, { passive: false });
 
 // Movement state
 const moveState = { forward: false, backward: false, left: false, right: false, sprint: false, up: false, down: false };
@@ -1246,7 +1274,7 @@ let playSpotDist = rackDist - 250; // distance from table center (adjustable)
 let playScale = 2.0; // scale of dominoes when played on table (jumbo for visibility)
 let playRotOffset = 0; // extra rotation in degrees for play spots
 let playCenterOffset = 0; // shift play center toward player (positive = closer to player)
-const PLAYER_SEAT = 4;
+const PLAYER_SEAT = FP_SEAT; // player's dominoes match first-person camera seat
 const RISE_HEIGHT = 120; // how high domino rises before flying
 
 const playSpots = [];
@@ -1296,7 +1324,7 @@ for (let seat = 0; seat < 6; seat++) {
     dom.userData.origScale = dom.scale.clone();
     allDomMeshes.push(dom);
     seatDoms.push(dom);
-    if (seat === 4) playerHand.push(dom);
+    if (seat === PLAYER_SEAT) playerHand.push(dom);
     rackGroup.add(dom);
   }
   seatDominoes.push(seatDoms);
@@ -1353,6 +1381,61 @@ function playDomino(dom) {
     endScale: new THREE.Vector3(playScale, playScale, playScale),
     midPos, endPos, endQuat, t: 0, phase: 'rise', done: false
   });
+
+  // Trigger arm animation for the playing seat
+  triggerArmPlay(seat);
+}
+
+// === ARM PLAY ANIMATION ===
+// When a domino is played, the player's right arm reaches out then returns to table
+const armAnims = []; // active arm animations
+
+function triggerArmPlay(seatIdx) {
+  // Remove any existing animation for this seat
+  const existing = armAnims.findIndex(a => a.seat === seatIdx);
+  if (existing >= 0) armAnims.splice(existing, 1);
+
+  armAnims.push({
+    seat: seatIdx,
+    t: 0,
+    phase: 'reach', // reach -> hold -> return
+    dur: 0.5 // total time for each phase
+  });
+}
+
+function updateArmAnims(dt) {
+  const easeIO = t => t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+
+  for (let i = armAnims.length - 1; i >= 0; i--) {
+    const a = armAnims[i];
+    const m = seatMannequins[a.seat];
+    if (!m || seatAnimData[a.seat].state < WSTATE.SETTLING) continue;
+    const j = m.joints;
+    a.t += dt;
+
+    // Arm reach pose: right arm extends forward to pick up/place domino
+    const reachShoulder = 1.6;  // arm reaches further forward
+    const reachElbow = -0.15;   // forearm more extended
+    const tableShoulder = TABLE_ARM_POSE.shoulderR.y; // 0.85
+    const tableElbow = TABLE_ARM_POSE.elbowR.y;       // -0.5
+
+    if (a.phase === 'reach') {
+      const t = Math.min(a.t / a.dur, 1);
+      const ease = easeIO(t);
+      j.shoulderR.rotation.y = tableShoulder + (reachShoulder - tableShoulder) * ease;
+      j.elbowR.rotation.y = tableElbow + (reachElbow - tableElbow) * ease;
+      if (t >= 1) { a.phase = 'hold'; a.t = 0; }
+    } else if (a.phase === 'hold') {
+      // Brief hold at extended position
+      if (a.t >= 0.3) { a.phase = 'return'; a.t = 0; }
+    } else if (a.phase === 'return') {
+      const t = Math.min(a.t / a.dur, 1);
+      const ease = easeIO(t);
+      j.shoulderR.rotation.y = reachShoulder + (tableShoulder - reachShoulder) * ease;
+      j.elbowR.rotation.y = reachElbow + (tableElbow - reachElbow) * ease;
+      if (t >= 1) { armAnims.splice(i, 1); }
+    }
+  }
 }
 
 // ZXCVBN = play domino 1-6 from your hand (+ all other seats play sequentially)
@@ -1429,6 +1512,67 @@ window.addEventListener('keydown', (e) => {
     renderer.setPixelRatio(renderScale);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderScaleEl.textContent = renderScale.toFixed(1);
+  }
+});
+
+// === TOUCH/CLICK TO PLAY DOMINOES (for iOS) ===
+const raycaster = new THREE.Raycaster();
+const tapMouse = new THREE.Vector2();
+
+function handleDominoTap(clientX, clientY) {
+  // Convert screen coords to normalized device coords
+  tapMouse.x = (clientX / window.innerWidth) * 2 - 1;
+  tapMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(tapMouse, camera);
+
+  // Only test against player's unplayed dominoes
+  const unplayed = playerHand.filter(d => d && !d.userData.played);
+  const hits = raycaster.intersectObjects(unplayed, true);
+
+  if (hits.length > 0) {
+    // Find the domino mesh (might have hit a child)
+    let dom = hits[0].object;
+    while (dom && !dom.userData.tileIndex && dom.userData.tileIndex !== 0) {
+      dom = dom.parent;
+    }
+    if (dom && !dom.userData.played
+        && playQueue.length === 0 && collectQueue.length === 0 && !trickCollecting) {
+      currentTrickDoms = [];
+      playDomino(dom);
+      currentTrickDoms.push(dom);
+      for (let offset = 1; offset < 6; offset++) {
+        const seat = (PLAYER_SEAT + offset) % 6;
+        const seatDom = seatDominoes[seat][trickIndex];
+        if (seatDom && !seatDom.userData.played) {
+          playQueue.push(seatDom);
+          currentTrickDoms.push(seatDom);
+        }
+      }
+      trickIndex++;
+      return true; // consumed the tap
+    }
+  }
+  return false; // not a domino tap
+}
+
+// Touch end — if short tap (not a drag), try playing a domino
+renderer.domElement.addEventListener('touchend', (e) => {
+  isTouchLooking = false;
+  const elapsed = Date.now() - touchStartTime;
+  // Short tap with minimal drag = domino tap
+  if (elapsed < 300 && touchTotalDrag < 15 && e.changedTouches.length > 0) {
+    const touch = e.changedTouches[0];
+    if (handleDominoTap(touch.clientX, touch.clientY)) {
+      e.preventDefault();
+    }
+  }
+}, { passive: false });
+
+// Click support (desktop fallback — only when not pointer-locked)
+renderer.domElement.addEventListener('click', (e) => {
+  if (!isLocked) {
+    handleDominoTap(e.clientX, e.clientY);
   }
 });
 
@@ -1791,7 +1935,7 @@ function animate() {
         continue;
       }
 
-      if (ad.state === WSTATE.SEATED || ad.state === WSTATE.SETTLING) continue;
+      if (ad.state === WSTATE.SEATED) continue;
       if (ad.state >= WSTATE.WALKING && ad.state <= WSTATE.PUSHING_IN) activeWalker = si;
 
       switch (ad.state) {
@@ -1960,6 +2104,9 @@ function animate() {
       pitch = -0.2; // slight downward look at table
     }
   }
+
+  // Update arm play animations
+  updateArmAnims(Math.min(delta, 0.05));
 
   // Process play queue — play next domino after current one lands
   if (playQueue.length > 0) {
