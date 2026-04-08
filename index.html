@@ -2759,14 +2759,27 @@ function animate() {
         targetM.joints.body.getWorldPosition(desiredLookTarget);
       }
 
-      // Smooth interpolation — no snapping
-      if (!window._introLookTarget) {
-        window._introLookTarget = desiredLookTarget.clone();
+      // Spring-based camera tracking — rubber-band feel, no sharp corners
+      if (!window._camSpring) {
+        window._camSpring = {
+          pos: desiredLookTarget.clone(),
+          vel: new THREE.Vector3(0, 0, 0),
+        };
       }
-      // Lerp speed: ~2-3 seconds to fully track a new target
-      const lerpSpeed = 1.8 * Math.min(delta, 0.05);
-      window._introLookTarget.lerp(desiredLookTarget, lerpSpeed);
-      camera.lookAt(window._introLookTarget);
+      const cs = window._camSpring;
+      const cDt = Math.min(delta, 0.05);
+      // Soft spring: stiffness 6, damping 4.5 → ~1-2s settle, gentle overshoot
+      const stiff = 6, damp = 4.5;
+      const dx = desiredLookTarget.x - cs.pos.x;
+      const dy = desiredLookTarget.y - cs.pos.y;
+      const dz = desiredLookTarget.z - cs.pos.z;
+      cs.vel.x += (dx * stiff - cs.vel.x * damp) * cDt;
+      cs.vel.y += (dy * stiff - cs.vel.y * damp) * cDt;
+      cs.vel.z += (dz * stiff - cs.vel.z * damp) * cDt;
+      cs.pos.x += cs.vel.x * cDt;
+      cs.pos.y += cs.vel.y * cDt;
+      cs.pos.z += cs.vel.z * cDt;
+      camera.lookAt(cs.pos);
     }
 
     // Check if all seated — end intro
