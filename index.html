@@ -52,7 +52,7 @@
   <div id="copyMsg" style="font-size:11px;color:#4f4;display:none;">Copied!</div>
 </div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
-<div id="ffBadge" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#ff0;font-family:monospace;font-size:18px;font-weight:bold;pointer-events:none;text-shadow:0 0 8px rgba(255,255,0,0.6);">&#9654;&#9654; 10x</div>
+<div id="ffBadge" onclick="toggleFF()" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#ff0;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;text-shadow:0 0 8px rgba(255,255,0,0.6);padding:8px 16px;-webkit-tap-highlight-color:transparent;">&#9654;&#9654; 10x</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ========== SCENE SETUP ==========
@@ -1191,6 +1191,13 @@ const W_WALK_SPEED = 200;
 const FP_SEAT = 1;
 let introMode = true; // true during walk-in sequence
 let introFF = true;   // fast-forward walk-in at 10x speed
+function toggleFF() {
+  if (!introMode) return;
+  introFF = !introFF;
+  const badge = document.getElementById('ffBadge');
+  badge.innerHTML = introFF ? '&#9654;&#9654; 10x' : '&#9654; 1x';
+  badge.style.color = introFF ? '#ff0' : '#aaa';
+}
 
 // ========== STATION SETUP (Chairs + Animated Mannequins) ==========
 const chairDist = APOTHEM + 80 + 225;
@@ -1512,6 +1519,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Period') { trickPileDist += 20; trickDistEl.textContent = Math.round(trickPileDist); updatePreviewPositions(); }
   // Q = toggle preview mode
   if (e.code === 'KeyQ') { togglePreview(); }
+  // F = toggle fast-forward during intro
+  if (e.code === 'KeyF' && introMode) { toggleFF(); }
   // ` (backquote) with shift = render scale up, without shift = render scale down
   if (e.code === 'Backquote') {
     if (e.shiftKey) {
