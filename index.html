@@ -1123,8 +1123,8 @@ function animateWalk(mannequin, dt, speed) {
   j.kneeL.rotation.y = Math.max(0, -Math.sin(t + Math.PI - 0.4)) * stride * 1.2;
   j.shoulderR.rotation.y = Math.sin(t + Math.PI) * armSwing;
   j.shoulderL.rotation.y = Math.sin(t) * armSwing;
-  j.elbowR.rotation.y = -Math.max(0, Math.sin(t + Math.PI - 0.3)) * 0.6;
-  j.elbowL.rotation.y = -Math.max(0, Math.sin(t - 0.3)) * 0.6;
+  j.elbowR.rotation.y = Math.max(0, Math.sin(t + Math.PI - 0.3)) * 0.6;
+  j.elbowL.rotation.y = Math.max(0, Math.sin(t - 0.3)) * 0.6;
 }
 
 // ========== POSE SYSTEM ==========
@@ -1141,7 +1141,7 @@ const SEATED_POSE = {
   hipL: { y: -1.57 }, hipR: { y: -1.57 },
   kneeL: { y: 1.57 }, kneeR: { y: 1.57 },
   shoulderL: { y: -0.4 }, shoulderR: { y: -0.4 },
-  elbowL: { y: -0.5 }, elbowR: { y: -0.5 }
+  elbowL: { y: 0.5 }, elbowR: { y: 0.5 }
 };
 
 function setJointPose(joints, pose) {
@@ -1173,8 +1173,8 @@ const WSTATE = {
 const TABLE_ARM_POSE = {
   shoulderL: { y: 0.85 },  // arms forward toward table
   shoulderR: { y: 0.85 },
-  elbowL: { y: -0.5 },     // forearms resting on table surface
-  elbowR: { y: -0.5 }
+  elbowL: { y: 0.7 },      // forearms bend forward onto table surface
+  elbowR: { y: 0.7 }
 };
 
 // Scale: walking mannequin lives at a smaller scale, we uniform-scale the station group
@@ -1422,10 +1422,10 @@ function updateArmAnims(dt) {
     a.t += dt;
 
     // Arm reach pose: right arm extends forward to pick up/place domino
-    const reachShoulder = 1.6;  // arm reaches further forward
-    const reachElbow = -0.15;   // forearm more extended
+    const reachShoulder = 1.3;  // arm reaches further forward
+    const reachElbow = 0.3;     // forearm extends out more (less bent)
     const tableShoulder = TABLE_ARM_POSE.shoulderR.y; // 0.85
-    const tableElbow = TABLE_ARM_POSE.elbowR.y;       // -0.5
+    const tableElbow = TABLE_ARM_POSE.elbowR.y;       // 0.7
 
     if (a.phase === 'reach') {
       const t = Math.min(a.t / a.dur, 1);
