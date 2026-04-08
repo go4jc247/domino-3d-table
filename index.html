@@ -2875,7 +2875,13 @@ function animate() {
       const eased = 1 - Math.pow(1 - flyT, 3);
       anim.dom.position.lerpVectors(anim.flyStart, anim.endPos, eased);
       anim.dom.quaternion.slerpQuaternions(anim.flyQuatStart, anim.endQuat, eased);
-      anim.dom.scale.lerpVectors(anim.startScale, anim.endScale, eased);
+      // Scale stays at startScale during flight, only scales up in final 30%
+      if (flyT < 0.7) {
+        anim.dom.scale.copy(anim.startScale);
+      } else {
+        const scaleT = (flyT - 0.7) / 0.3; // 0→1 over last 30% of flight
+        anim.dom.scale.lerpVectors(anim.startScale, anim.endScale, scaleT);
+      }
       if (flyT >= 1) {
         anim.done = true;
       }
