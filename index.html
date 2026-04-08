@@ -2956,6 +2956,17 @@ function animate() {
     }
   }
 
+  // Show/hide player head based on camera distance from head
+  if (!introMode) {
+    const fpM = seatMannequins[FP_SEAT];
+    if (fpM && fpM.joints.head) {
+      const headPos = new THREE.Vector3();
+      fpM.joints.head.getWorldPosition(headPos);
+      const dist = camera.position.distanceTo(headPos);
+      fpM.joints.head.visible = dist > 50; // hide when inside head, show when pulled back
+    }
+  }
+
   // Update camera look direction from yaw/pitch (only when not in intro)
   if (!introMode) {
     const lookX = Math.cos(pitch) * Math.cos(yaw);
