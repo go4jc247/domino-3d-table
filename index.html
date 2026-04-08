@@ -3002,13 +3002,15 @@ function animate() {
   }
 
   // Show/hide player head based on camera distance from head
-  if (!introMode) {
-    const fpM = seatMannequins[FP_SEAT];
-    if (fpM && fpM.joints.head) {
+  const fpM = seatMannequins[FP_SEAT];
+  if (fpM && fpM.joints.head) {
+    if (introMode) {
+      fpM.joints.head.visible = false;
+    } else {
       const headPos = new THREE.Vector3();
       fpM.joints.head.getWorldPosition(headPos);
       const dist = camera.position.distanceTo(headPos);
-      fpM.joints.head.visible = dist > 50; // hide when inside head, show when pulled back
+      fpM.joints.head.visible = dist > 50;
     }
   }
 
