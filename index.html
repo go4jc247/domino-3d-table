@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Domino Table - 3D View</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TX 42">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <title>TX 42 - 3D Domino Table</title>
   <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    canvas { display: block; touch-action: none; }
     #controls input[type="range"] { width: 100px; vertical-align: middle; }
     #controls span { display: inline-block; width: 30px; }
     #info {
@@ -1531,37 +1539,57 @@ function handleDominoTap(clientX, clientY) {
   const hits = raycaster.intersectObjects(unplayed, true);
 
   if (hits.length > 0) {
-    // Find the domino mesh (might have hit a child)
+    // Walk up to find the domino group with tileIndex userData
     let dom = hits[0].object;
-    while (dom && !dom.userData.tileIndex && dom.userData.tileIndex !== 0) {
+    while (dom && dom.userData.tileIndex === undefined) {
       dom = dom.parent;
     }
-    if (dom && !dom.userData.played
-        && playQueue.length === 0 && collectQueue.length === 0 && !trickCollecting) {
-      currentTrickDoms = [];
-      playDomino(dom);
-      currentTrickDoms.push(dom);
-      for (let offset = 1; offset < 6; offset++) {
-        const seat = (PLAYER_SEAT + offset) % 6;
-        const seatDom = seatDominoes[seat][trickIndex];
-        if (seatDom && !seatDom.userData.played) {
-          playQueue.push(seatDom);
-          currentTrickDoms.push(seatDom);
-        }
-      }
-      trickIndex++;
-      return true; // consumed the tap
+    if (dom) return playDominoByTap(dom);
+  }
+
+  // Fallback: if raycast missed, find nearest domino by screen distance
+  // This helps on iOS where touch targets feel small
+  if (unplayed.length > 0) {
+    let bestDom = null, bestDist = 80; // max 80px away
+    scene.updateMatrixWorld(true);
+    for (const d of unplayed) {
+      const wp = new THREE.Vector3();
+      d.getWorldPosition(wp);
+      wp.project(camera);
+      const sx = (wp.x + 1) / 2 * window.innerWidth;
+      const sy = (-wp.y + 1) / 2 * window.innerHeight;
+      const dist = Math.hypot(clientX - sx, clientY - sy);
+      if (dist < bestDist) { bestDist = dist; bestDom = d; }
+    }
+    if (bestDom) return playDominoByTap(bestDom);
+  }
+
+  return false;
+}
+
+function playDominoByTap(dom) {
+  if (dom.userData.played || playQueue.length > 0 || collectQueue.length > 0 || trickCollecting) return false;
+  currentTrickDoms = [];
+  playDomino(dom);
+  currentTrickDoms.push(dom);
+  for (let offset = 1; offset < 6; offset++) {
+    const seat = (PLAYER_SEAT + offset) % 6;
+    const seatDom = seatDominoes[seat][trickIndex];
+    if (seatDom && !seatDom.userData.played) {
+      playQueue.push(seatDom);
+      currentTrickDoms.push(seatDom);
     }
   }
-  return false; // not a domino tap
+  trickIndex++;
+  return true;
 }
 
 // Touch end — if short tap (not a drag), try playing a domino
 renderer.domElement.addEventListener('touchend', (e) => {
   isTouchLooking = false;
   const elapsed = Date.now() - touchStartTime;
-  // Short tap with minimal drag = domino tap
-  if (elapsed < 300 && touchTotalDrag < 15 && e.changedTouches.length > 0) {
+  // Short tap with minimal drag = domino tap (generous thresholds for iOS)
+  if (elapsed < 400 && touchTotalDrag < 30 && e.changedTouches.length > 0) {
     const touch = e.changedTouches[0];
     if (handleDominoTap(touch.clientX, touch.clientY)) {
       e.preventDefault();
@@ -2259,6 +2287,11 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// ========== SERVICE WORKER REGISTRATION ==========
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
