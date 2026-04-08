@@ -52,7 +52,7 @@
   <div id="copyMsg" style="font-size:11px;color:#4f4;display:none;">Copied!</div>
 </div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
-<div id="ffBadge" onclick="toggleFF()" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#ff0;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;text-shadow:0 0 8px rgba(255,255,0,0.6);padding:8px 16px;-webkit-tap-highlight-color:transparent;">&#9654;&#9654; 10x</div>
+<div id="ffBadge" onclick="toggleFF()" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#aaa;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;text-shadow:0 0 8px rgba(255,255,0,0.6);padding:8px 16px;-webkit-tap-highlight-color:transparent;">&#9654; 1x</div>
 <div id="armPanel" style="display:none;position:fixed;bottom:60px;left:10px;font-family:monospace;font-size:12px;color:#ccc;background:rgba(0,0,0,0.8);padding:10px;border-radius:8px;z-index:10;-webkit-tap-highlight-color:transparent;max-height:70vh;overflow-y:auto;">
   <div style="margin-bottom:6px;color:#ff0;font-weight:bold;">Arm Poses <span onclick="toggleArmPanel()" style="cursor:pointer;float:right;padding:0 6px;">✕</span></div>
   <div id="armPoseControls"></div>
@@ -1212,7 +1212,7 @@ const W_WALK_SPEED = 200;
 // Player seat index 1 (60°) is "you" — first person camera
 const FP_SEAT = 1;
 let introMode = true; // true during walk-in sequence
-let introFF = true;   // fast-forward walk-in at 10x speed
+let introFF = false;  // start at 1x, user can tap badge for 10x
 function toggleFF() {
   if (!introMode) return;
   introFF = !introFF;
@@ -1691,16 +1691,15 @@ for (let i = 0; i < 6; i++) {
 const charState = [];
 for (let i = 0; i < 6; i++) {
   const tr = CHARACTER_TRAITS[i];
-  // Head springs: HIGH stiffness, slightly underdamped (damping ratio ~0.75-0.8)
-  // → snappy 150-300ms head turns with tiny overshoot
-  const headStiff = 180 + Math.random() * 60;  // 180-240 (very snappy)
-  const headDamp  = 20 + Math.random() * 4;    // underdamped for overshoot
-  // Body springs: LOWER stiffness, more damped (slow, heavy)
-  const bodyStiff = 25 + Math.random() * 10;
-  const bodyDamp  = 10 + Math.random() * 3;
+  // Head springs: firm but smooth — visible 300-500ms transitions, no teleporting
+  const headStiff = 35 + Math.random() * 15;   // 35-50 (smooth, purposeful)
+  const headDamp  = 9 + Math.random() * 2;     // slight underdamp for natural settle
+  // Body springs: slow and heavy
+  const bodyStiff = 12 + Math.random() * 6;    // 12-18
+  const bodyDamp  = 7 + Math.random() * 2;
   // Arm springs: medium
-  const armStiff = 40 + Math.random() * 15;
-  const armDamp  = 12 + Math.random() * 3;
+  const armStiff = 25 + Math.random() * 10;    // 25-35
+  const armDamp  = 9 + Math.random() * 2;
 
   charState.push({
     ch: {
@@ -1712,7 +1711,7 @@ for (let i = 0; i < 6; i++) {
       shLX:   makeSpring(0, armStiff, armDamp),
       shLY:   makeSpring(TABLE_ARM_POSE.shoulderL.y, armStiff, armDamp),
       elLY:   makeSpring(TABLE_ARM_POSE.elbowL.y, armStiff, armDamp),
-      blink:  makeSpring(0, 500, 30),  // very fast blink snap (150ms)
+      blink:  makeSpring(0, 200, 22),  // fast but visible blink (~200ms)
     },
     // Breathing
     breathPhase: Math.random() * Math.PI * 2,
