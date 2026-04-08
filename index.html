@@ -1193,6 +1193,10 @@ for (let i = 0; i < 6; i++) {
   m.joints.body.position.x = 0;
   m.walkPhase = 0;
   m.visible = false; // hidden until their turn
+  // Hide first-person player's head so you don't see the back of your own eyes/hat
+  if (i === FP_SEAT) {
+    m.joints.head.visible = false;
+  }
   station.add(m);
   seatMannequins.push(m);
 
