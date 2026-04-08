@@ -5,6 +5,8 @@
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
+    #controls input[type="range"] { width: 100px; vertical-align: middle; }
+    #controls span { display: inline-block; width: 30px; }
     #info {
       position: absolute; bottom: 10px; left: 10px;
       color: #aaa; font-family: monospace; font-size: 13px;
@@ -14,6 +16,33 @@
 </head>
 <body>
 <div id="info">Click: enable | WASD: walk | Mouse: look | Shift: run | Space: rise | Ctrl: lower | ESC: release</div>
+<div id="controls" style="position:absolute;top:10px;right:10px;font-family:monospace;font-size:12px;color:#ccc;display:flex;flex-direction:column;gap:4px;">
+  <div style="font-size:11px;color:#777;margin-bottom:4px;">
+    F/H: Dom Y &nbsp; G/T: Dom Z &nbsp; 7/8: FOV<br>
+    J/L: Back Y &nbsp; K: hide backer &nbsp; I: hide guards<br>
+    P: copy cam pos &nbsp; O: copy adjustments<br>
+    Z/X/C/V/B/N: play domino 1-6<br>
+    9/0: anim speed &nbsp; 1/2: play scale<br>
+    3/4: play dist &nbsp; 5/6: play rot<br>
+    [/]: center offset &nbsp; Q: preview<br>
+    -/=: trick angle &nbsp; ,/.: trick dist<br>
+    `/~: render scale -/+
+  </div>
+  <label>Dom Y: <span id="domYVal">-8</span></label>
+  <label>Dom Z: <span id="domZVal">32</span></label>
+  <label>Back Y: <span id="backYVal">-5</span></label>
+  <label>FOV: <span id="fovVal">60</span></label>
+  <label>Speed: <span id="animSpeedVal">1.0</span></label>
+  <label>Play Scale: <span id="playScaleVal">2.0</span></label>
+  <label>Play Dist: <span id="playDistVal">469</span></label>
+  <label>Play Rot: <span id="playRotVal">0</span></label>
+  <label>Center Ofs: <span id="centerOfsVal">0</span></label>
+  <label>Trick Angle: <span id="trickAngleVal">270</span></label>
+  <label>Trick Dist: <span id="trickDistVal">780</span></label>
+  <label>Render: <span id="renderScaleVal">--</span>x</label>
+  <div id="camInfo" style="margin-top:4px;font-size:11px;color:#999;">Cam: 0, 0, 0</div>
+  <div id="copyMsg" style="font-size:11px;color:#4f4;display:none;">Copied!</div>
+</div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -27,19 +56,22 @@ const EYE_HEIGHT = 1600;
 const CAM_Z = FLOOR_Z + EYE_HEIGHT;
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 8000);
-camera.position.set(0, -1800, CAM_Z);
+camera.position.set(-508, -963, 422);
 camera.up.set(0, 0, 1); // Z is up in this scene
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+let renderScale = window.devicePixelRatio;
+renderer.setPixelRatio(renderScale);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;
 document.body.appendChild(renderer.domElement);
 
 // ========== FPS GROUND-LOCKED CONTROLS ==========
 const crosshair = document.getElementById('crosshair');
 let isLocked = false;
-let yaw = Math.PI / 2;   // horizontal angle (start facing +Y toward table)
-let pitch = -0.4;         // vertical angle (slightly looking down at table)
+let yaw = 62 * Math.PI / 180;   // horizontal angle
+let pitch = -31 * Math.PI / 180; // vertical angle
 const PITCH_MAX = Math.PI / 2 - 0.05;
 
 // Pointer lock
@@ -88,26 +120,174 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ========== LIGHTS ==========
-const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+const ambient = new THREE.AmbientLight(0xffe8cc, 0.3);
 scene.add(ambient);
 
-const spot = new THREE.SpotLight(0xffffff, 0.7);
-spot.position.set(0, 0, 2000);
-spot.castShadow = true;
-scene.add(spot);
+// Chandelier light — warm pool-table style downlight
+const chandelierLight = new THREE.SpotLight(0xffeedd, 1.0);
+chandelierLight.position.set(0, 0, 1000);
+chandelierLight.angle = Math.PI / 3.5;
+chandelierLight.penumbra = 0.6;
+chandelierLight.decay = 1.5;
+chandelierLight.castShadow = true;
+chandelierLight.shadow.mapSize.width = 2048;
+chandelierLight.shadow.mapSize.height = 2048;
+scene.add(chandelierLight);
+scene.add(chandelierLight.target); // target defaults to (0,0,0)
 
-const fill = new THREE.PointLight(0xffffff, 0.3);
-fill.position.set(-800, -800, 600);
-scene.add(fill);
+// Secondary warm fill from chandelier (broader)
+const chandelierFill = new THREE.PointLight(0xffd4a0, 0.4);
+chandelierFill.position.set(0, 0, 900);
+scene.add(chandelierFill);
+
+// Fill lights from multiple angles to illuminate domino faces
+const fill1 = new THREE.PointLight(0xffeedd, 0.25);
+fill1.position.set(-800, -800, 600);
+scene.add(fill1);
+
+const fill2 = new THREE.PointLight(0xffeedd, 0.25);
+fill2.position.set(800, -800, 600);
+scene.add(fill2);
+
+const fill3 = new THREE.PointLight(0xffeedd, 0.2);
+fill3.position.set(0, 800, 400);
+scene.add(fill3);
+
+// Subtle room ambient from walls
+const roomFill = new THREE.HemisphereLight(0x8888aa, 0x444422, 0.15);
+scene.add(roomFill);
+
+// ========== PROCEDURAL TEXTURES ==========
+function createWoodTexture(baseR, baseG, baseB, grainDensity) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 512;
+  const ctx = c.getContext('2d');
+  // Base color
+  ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
+  ctx.fillRect(0, 0, 512, 512);
+  // Wood grain lines
+  for (let i = 0; i < grainDensity; i++) {
+    const y = Math.random() * 512;
+    const w = 1 + Math.random() * 3;
+    const alpha = 0.05 + Math.random() * 0.12;
+    const darker = Math.random() > 0.5;
+    ctx.strokeStyle = darker ? `rgba(0,0,0,${alpha})` : `rgba(255,200,100,${alpha * 0.5})`;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    // Wavy grain
+    for (let x = 0; x < 512; x += 20) {
+      ctx.lineTo(x, y + Math.sin(x * 0.02 + i) * (3 + Math.random() * 5));
+    }
+    ctx.stroke();
+  }
+  // Subtle noise
+  const imgData = ctx.getImageData(0, 0, 512, 512);
+  for (let p = 0; p < imgData.data.length; p += 4) {
+    const n = (Math.random() - 0.5) * 12;
+    imgData.data[p] += n;
+    imgData.data[p+1] += n;
+    imgData.data[p+2] += n;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function createFeltTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 512;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#006820';
+  ctx.fillRect(0, 0, 512, 512);
+  // Felt fiber noise
+  const imgData = ctx.getImageData(0, 0, 512, 512);
+  for (let p = 0; p < imgData.data.length; p += 4) {
+    const n = (Math.random() - 0.5) * 18;
+    imgData.data[p] += n * 0.3;
+    imgData.data[p+1] += n;
+    imgData.data[p+2] += n * 0.3;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  // Subtle fiber lines
+  ctx.globalAlpha = 0.04;
+  for (let i = 0; i < 2000; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const len = 3 + Math.random() * 8;
+    const angle = Math.random() * Math.PI;
+    ctx.strokeStyle = Math.random() > 0.5 ? '#004010' : '#008030';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function createFloorTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 512;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#2a2a3e';
+  ctx.fillRect(0, 0, 512, 512);
+  const imgData = ctx.getImageData(0, 0, 512, 512);
+  for (let p = 0; p < imgData.data.length; p += 4) {
+    const n = (Math.random() - 0.5) * 10;
+    imgData.data[p] += n;
+    imgData.data[p+1] += n;
+    imgData.data[p+2] += n;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(8, 8);
+  return tex;
+}
+
+// Generate textures
+const woodTex = createWoodTexture(139, 69, 19, 80);    // dark wood for table
+woodTex.repeat.set(0.25, 0.25);
+const railTex = createWoodTexture(92, 51, 23, 100);     // darker rail wood
+railTex.repeat.set(0.25, 0.25);
+const chairTex = createWoodTexture(180, 120, 60, 60);   // lighter chair wood
+chairTex.repeat.set(1, 2);
+const rackTex = createWoodTexture(120, 65, 20, 70);     // rack wood
+const feltTex = createFeltTexture();
+feltTex.repeat.set(1, 1);
+const floorTex = createFloorTexture();
+
+// Bump maps for depth
+const woodBump = createWoodTexture(128, 128, 128, 80);
+const feltBump = createFeltTexture();
 
 // ========== MATERIALS ==========
-const woodMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
-const feltMat = new THREE.MeshPhongMaterial({ color: 0x006400 });
-const railMat = new THREE.MeshPhongMaterial({ color: 0x5C3317 });
+const woodMat = new THREE.MeshPhongMaterial({
+  map: woodTex, bumpMap: woodBump, bumpScale: 0.8,
+  shininess: 40, specular: new THREE.Color(0x332211)
+});
+const feltMat = new THREE.MeshPhongMaterial({
+  map: feltTex, bumpMap: feltBump, bumpScale: 0.3,
+  shininess: 5, specular: new THREE.Color(0x111111)
+});
+const railMat = new THREE.MeshPhongMaterial({
+  map: railTex, bumpMap: woodBump, bumpScale: 1.0,
+  shininess: 50, specular: new THREE.Color(0x443322)
+});
 const ivoryMat = new THREE.MeshPhongMaterial({ color: 0xFFFFF0 });
 const blackMat = new THREE.MeshPhongMaterial({ color: 0x111111 });
-const chairMat = new THREE.MeshPhongMaterial({ color: 0xCD853F });
-const rackMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+const chairMat = new THREE.MeshPhongMaterial({
+  map: chairTex, bumpMap: woodBump, bumpScale: 0.6,
+  shininess: 35, specular: new THREE.Color(0x332211)
+});
+const rackMat = new THREE.MeshPhongMaterial({
+  map: rackTex, bumpMap: woodBump, bumpScale: 0.5,
+  shininess: 30, specular: new THREE.Color(0x221100)
+});
 
 // Pip colors from TX-Dom-Dev
 const pipColors = [
@@ -124,14 +304,38 @@ const LEG_HEIGHT = 700;
 const APOTHEM = TABLE_RADIUS * Math.cos(Math.PI / 6);
 
 // ========== HEXAGONAL SHAPE HELPER ==========
-function hexShape(radius, offsetDeg) {
+function hexShape(radius, offsetDeg, cornerRadius) {
   const shape = new THREE.Shape();
+  const cr = cornerRadius || 0;
+  const verts = [];
   for (let i = 0; i < 6; i++) {
     const angle = (i * 60 + offsetDeg) * Math.PI / 180;
-    const x = radius * Math.cos(angle);
-    const y = radius * Math.sin(angle);
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
+    verts.push({ x: radius * Math.cos(angle), y: radius * Math.sin(angle) });
+  }
+  if (cr <= 0) {
+    // Sharp corners
+    shape.moveTo(verts[0].x, verts[0].y);
+    for (let i = 1; i < 6; i++) shape.lineTo(verts[i].x, verts[i].y);
+  } else {
+    // Rounded corners
+    for (let i = 0; i < 6; i++) {
+      const prev = verts[(i + 5) % 6];
+      const curr = verts[i];
+      const next = verts[(i + 1) % 6];
+      // Direction vectors
+      const dx1 = prev.x - curr.x, dy1 = prev.y - curr.y;
+      const dx2 = next.x - curr.x, dy2 = next.y - curr.y;
+      const len1 = Math.sqrt(dx1*dx1 + dy1*dy1);
+      const len2 = Math.sqrt(dx2*dx2 + dy2*dy2);
+      // Points pulled back from corner
+      const p1x = curr.x + (dx1/len1) * cr;
+      const p1y = curr.y + (dy1/len1) * cr;
+      const p2x = curr.x + (dx2/len2) * cr;
+      const p2y = curr.y + (dy2/len2) * cr;
+      if (i === 0) shape.moveTo(p1x, p1y);
+      else shape.lineTo(p1x, p1y);
+      shape.quadraticCurveTo(curr.x, curr.y, p2x, p2y);
+    }
   }
   shape.closePath();
   return shape;
@@ -140,36 +344,53 @@ function hexShape(radius, offsetDeg) {
 // ========== TABLE ==========
 function createTable() {
   const group = new THREE.Group();
+  const CORNER_R = 60; // rounded corner radius
 
-  // Rail (full hex)
-  const topGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS, 30), { depth: TOP_THICKNESS, bevelEnabled: false });
+  // Rail (full hex with rounded corners and bevel)
+  const topGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS, 30, CORNER_R), {
+    depth: TOP_THICKNESS, bevelEnabled: true,
+    bevelThickness: 8, bevelSize: 8, bevelSegments: 4
+  });
   const top = new THREE.Mesh(topGeo, railMat);
   top.receiveShadow = true;
   group.add(top);
 
-  // Felt
-  const feltGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS - RAIL_WIDTH, 30), { depth: FELT_DEPTH, bevelEnabled: false });
+  // Felt (inset, raised above rail to avoid z-fighting)
+  const feltGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS - RAIL_WIDTH, 30, CORNER_R * 0.5), {
+    depth: FELT_DEPTH, bevelEnabled: false
+  });
   const felt = new THREE.Mesh(feltGeo, feltMat);
-  felt.position.z = TOP_THICKNESS - FELT_DEPTH + 1;
+  felt.position.z = TOP_THICKNESS + 6; // sits clearly on top of rail surface
   felt.receiveShadow = true;
   group.add(felt);
 
-  // Legs
-  const legGeo = new THREE.BoxGeometry(65, 65, LEG_HEIGHT);
+  // Apron (skirt under the table top)
+  const apronH = 60;
+  const apronGeo = new THREE.ExtrudeGeometry(hexShape(TABLE_RADIUS - 15, 30, CORNER_R), {
+    depth: apronH, bevelEnabled: true,
+    bevelThickness: 4, bevelSize: 4, bevelSegments: 2
+  });
+  const apron = new THREE.Mesh(apronGeo, woodMat);
+  apron.position.z = -apronH;
+  group.add(apron);
+
+  // Legs — tapered cylinders instead of boxes
   const legR = TABLE_RADIUS - 120;
   for (let i = 0; i < 6; i++) {
     const angle = (i * 60 + 30) * Math.PI / 180;
+    const legGeo = new THREE.CylinderGeometry(22, 30, LEG_HEIGHT, 12);
+    legGeo.rotateX(Math.PI / 2); // align with Z-up
     const leg = new THREE.Mesh(legGeo, woodMat);
-    leg.position.set(legR * Math.cos(angle), legR * Math.sin(angle), -LEG_HEIGHT / 2);
+    leg.position.set(legR * Math.cos(angle), legR * Math.sin(angle), -apronH - LEG_HEIGHT / 2);
     leg.castShadow = true;
     group.add(leg);
   }
 
   // Floor
   const floorGeo = new THREE.PlaneGeometry(6000, 6000);
-  const floorMat = new THREE.MeshPhongMaterial({ color: 0x2a2a3e });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.position.z = -LEG_HEIGHT;
+  const floorMatObj = new THREE.MeshPhongMaterial({ map: floorTex, shininess: 10 });
+  const floor = new THREE.Mesh(floorGeo, floorMatObj);
+  floor.position.z = -apronH - LEG_HEIGHT;
   floor.receiveShadow = true;
   group.add(floor);
 
@@ -179,29 +400,73 @@ function createTable() {
 // ========== CHAIR ==========
 function createChair() {
   const group = new THREE.Group();
-  const sw = 450, sd = 450, st = 40, sh = 450, bh = 500, bt = 30, cls = 40;
+  const sw = 450, sd = 450, st = 45, sh = 450, bh = 500, bt = 25;
 
-  // Seat
-  const seatGeo = new THREE.BoxGeometry(sd, sw, st);
-  const seat = new THREE.Mesh(seatGeo, chairMat);
-  seat.position.set(0, 0, sh - st / 2);
+  // Cushion material (dark leather look)
+  const cushionMat = new THREE.MeshPhongMaterial({
+    color: 0x6B1A00, shininess: 20, specular: new THREE.Color(0x332211)
+  });
+
+  // Seat — rounded box via ExtrudeGeometry
+  const seatShape = new THREE.Shape();
+  const sR = 25;
+  const shw = sw/2, shd = sd/2;
+  seatShape.moveTo(-shd + sR, -shw);
+  seatShape.lineTo(shd - sR, -shw);
+  seatShape.quadraticCurveTo(shd, -shw, shd, -shw + sR);
+  seatShape.lineTo(shd, shw - sR);
+  seatShape.quadraticCurveTo(shd, shw, shd - sR, shw);
+  seatShape.lineTo(-shd + sR, shw);
+  seatShape.quadraticCurveTo(-shd, shw, -shd, shw - sR);
+  seatShape.lineTo(-shd, -shw + sR);
+  seatShape.quadraticCurveTo(-shd, -shw, -shd + sR, -shw);
+
+  const seatGeo = new THREE.ExtrudeGeometry(seatShape, {
+    depth: st, bevelEnabled: true,
+    bevelThickness: 8, bevelSize: 8, bevelSegments: 3
+  });
+  const seat = new THREE.Mesh(seatGeo, cushionMat);
+  seat.position.set(0, 0, sh - st);
   group.add(seat);
 
-  // Backrest
-  const backGeo = new THREE.BoxGeometry(bt, sw, bh);
+  // Backrest — rounded rectangle standing upright
+  // Shape drawn in XY: X = side-to-side width, Y = height
+  const bkw = sw/2 - 10; // half-width
+  const bkh = bh/2 - 20; // half-height
+  const bR = 30;
+  const backShape = new THREE.Shape();
+  backShape.moveTo(-bkw + bR, -bkh);
+  backShape.lineTo(bkw - bR, -bkh);
+  backShape.quadraticCurveTo(bkw, -bkh, bkw, -bkh + bR);
+  backShape.lineTo(bkw, bkh - bR);
+  backShape.quadraticCurveTo(bkw, bkh, bkw - bR, bkh);
+  backShape.lineTo(-bkw + bR, bkh);
+  backShape.quadraticCurveTo(-bkw, bkh, -bkw, bkh - bR);
+  backShape.lineTo(-bkw, -bkh + bR);
+  backShape.quadraticCurveTo(-bkw, -bkh, -bkw + bR, -bkh);
+
+  const backGeo = new THREE.ExtrudeGeometry(backShape, {
+    depth: bt, bevelEnabled: true,
+    bevelThickness: 5, bevelSize: 5, bevelSegments: 2
+  });
+  // Extrude goes into +Z. Rotate to stand upright and face correct direction
+  backGeo.rotateX(Math.PI / 2); // stand up: X=width, Y=thickness, Z=height
+  backGeo.rotateZ(Math.PI / 2); // spin so width is along Y (side-to-side), thin in X (front-back)
   const back = new THREE.Mesh(backGeo, chairMat);
-  back.position.set(sd / 2 - bt / 2, 0, sh + bh / 2);
+  back.position.set(sd/2 - bt/2, 0, sh + bkh);
+  back.rotation.y = 0.08; // slight recline backward
   group.add(back);
 
-  // Legs
-  const legGeo = new THREE.BoxGeometry(cls, cls, sh - st);
-  const positions = [
-    [-sd/2 + cls/2, -sw/2 + cls/2],
-    [sd/2 - cls/2, -sw/2 + cls/2],
-    [-sd/2 + cls/2, sw/2 - cls/2],
-    [sd/2 - cls/2, sw/2 - cls/2]
+  // Legs — tapered cylinders with slight splay
+  const legPositions = [
+    [-sd/2 + 45, -sw/2 + 45],
+    [sd/2 - 45, -sw/2 + 45],
+    [-sd/2 + 45, sw/2 - 45],
+    [sd/2 - 45, sw/2 - 45]
   ];
-  for (const [x, y] of positions) {
+  for (const [x, y] of legPositions) {
+    const legGeo = new THREE.CylinderGeometry(15, 22, sh - st, 8);
+    legGeo.rotateX(Math.PI / 2); // Z-up
     const leg = new THREE.Mesh(legGeo, chairMat);
     leg.position.set(x, y, (sh - st) / 2);
     leg.castShadow = true;
@@ -211,17 +476,24 @@ function createChair() {
   return group;
 }
 
-// ========== DOMINO (OpenSCAD-inspired design) ==========
-// Dimensions: 48 x 24 x 10mm with 2mm bevel
-const DOM_L = 48, DOM_W = 24, DOM_H = 10, DOM_BEVEL = 2;
-const PIP_R = 2.5, PIP_DEPTH = 1.8, HOLE_DEPTH = 4;
-const GROOVE_W = 2.5, GROOVE_LEN = 17.5, GROOVE_DEPTH = 0.7;
-const CONCAVE_DEPTH = 1.8;
+// ========== DOMINO (3-layer design matching OpenSCAD) ==========
+const DOM_L = 50, DOM_W = 25, DOM_H = 9, DOM_BEVEL = 2;
+const PIP_R = 2.5, HOLE_DEPTH = 4;
+const GROOVE_W = 2.5, GROOVE_LEN = 17.5;
+const BOWL_DEPTH = 2.5;
+const BOWL_ROT_X = Math.PI / 2;
+const PILL_RY = Math.PI / 2;
+const TC_RY = Math.PI;
+const BC_RY = Math.PI;
+const BC_RZ = Math.PI;
+const PIP_SHININESS = 295, PIP_SPEC = 70;
+const BODY_SHININESS = 30, BODY_SPEC = 15;
+const GROOVE_SHININESS = 30, GROOVE_SPEC = 15;
 
 const pipGrid = {
-  TL: [-3.75,  3.75], T: [-3.75, 0], TR: [-3.75, -3.75],
-  L:  [0,      3.75], C: [0,     0], R:  [0,     -3.75],
-  BL: [3.75,   3.75], B: [3.75,  0], BR: [3.75,  -3.75]
+  TL: [-6.25,  6.25], T: [-6.25, 0], TR: [-6.25, -6.25],
+  L:  [0,      6.25], C: [0,     0], R:  [0,     -6.25],
+  BL: [6.25,   6.25], B: [6.25,  0], BR: [6.25,  -6.25]
 };
 const pipLayouts = [
   [],
@@ -234,8 +506,7 @@ const pipLayouts = [
   ['TL', 'TR', 'L', 'C', 'R', 'BL', 'BR']
 ];
 
-// Rounded box geometry (like minkowski in OpenSCAD)
-function createRoundedBox(w, h, d, r, segments) {
+function roundedRectShape(w, h, r) {
   const shape = new THREE.Shape();
   const x = w/2 - r, y = h/2 - r;
   shape.moveTo(-x, -h/2);
@@ -247,77 +518,136 @@ function createRoundedBox(w, h, d, r, segments) {
   shape.quadraticCurveTo(-w/2, h/2, -w/2, y);
   shape.lineTo(-w/2, -y);
   shape.quadraticCurveTo(-w/2, -h/2, -x, -h/2);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: d - 2*r, bevelEnabled: true,
-    bevelThickness: r, bevelSize: r, bevelSegments: segments || 3
-  });
-  geo.translate(0, 0, -(d - 2*r)/2 - r);
-  return geo;
+  return shape;
 }
 
-// Concave depression geometry (sphere cap approximation)
-function createConcavePip(radius, depth, segs) {
-  const sphereR = (radius*radius + depth*depth) / (2*depth);
-  const geo = new THREE.SphereGeometry(sphereR, segs || 24, segs || 24,
-    0, Math.PI*2, 0, Math.asin(radius/sphereR));
-  geo.rotateX(Math.PI);
-  return geo;
-}
+const pendingFrames = [];
 
 function createDomino(leftVal, rightVal) {
   const group = new THREE.Group();
   const topZ = DOM_H / 2;
+  const splitZ = topZ - HOLE_DEPTH;
+  const gr = GROOVE_W / 2;
+  const gl = GROOVE_LEN / 2;
+  const frameW = DOM_BEVEL;
 
-  // 1. Ivory rounded body
-  const bodyGeo = createRoundedBox(DOM_L, DOM_W, DOM_H, DOM_BEVEL, 4);
-  const body = new THREE.Mesh(bodyGeo, ivoryMat);
+  const bodySpecColor = new THREE.Color(`rgb(${BODY_SPEC},${BODY_SPEC},${BODY_SPEC})`);
+  const grooveSpecColor = new THREE.Color(`rgb(${GROOVE_SPEC},${GROOVE_SPEC},${GROOVE_SPEC})`);
+  const pipSpecColor = new THREE.Color(`rgb(${PIP_SPEC},${PIP_SPEC},${PIP_SPEC})`);
+  const domIvoryMat = new THREE.MeshPhongMaterial({ color: 0xFFFFF0, shininess: BODY_SHININESS, specular: bodySpecColor });
+  const domBlackMat = new THREE.MeshPhongMaterial({ color: 0x111111, side: THREE.DoubleSide, shininess: GROOVE_SHININESS, specular: grooveSpecColor });
+
+  // Collect pip positions
+  const allPips = [];
+  if (leftVal > 0)
+    for (const name of pipLayouts[leftVal]) {
+      const [px, py] = pipGrid[name];
+      allPips.push({ x: -DOM_L/4 + px, y: py, val: leftVal });
+    }
+  if (rightVal > 0)
+    for (const name of pipLayouts[rightVal]) {
+      const [px, py] = pipGrid[name];
+      allPips.push({ x: DOM_L/4 + px, y: py, val: rightVal });
+    }
+
+  // LAYER 1: BODY — beveled edges, up to splitZ only (leaves room for inner slab on top)
+  const bodyShape = roundedRectShape(DOM_L, DOM_W, DOM_BEVEL);
+  const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, {
+    depth: DOM_H - HOLE_DEPTH, bevelEnabled: true,
+    bevelThickness: DOM_BEVEL, bevelSize: DOM_BEVEL, bevelSegments: 3
+  });
+  bodyGeo.translate(0, 0, -topZ - DOM_BEVEL);
+  const body = new THREE.Mesh(bodyGeo, domIvoryMat);
   body.castShadow = true;
   group.add(body);
 
-  // 2. Pip holes — dark cylinders inset into the ivory surface
-  const holeGeo = new THREE.CylinderGeometry(PIP_R, PIP_R, HOLE_DEPTH, 24);
-  holeGeo.rotateX(Math.PI / 2);
-  const holeMat = new THREE.MeshPhongMaterial({ color: 0x0a0a0a });
+  // LAYER 2: BEVELED FRAME — same as viewer, clipping planes updated to world space after placement
+  const innerX = DOM_L/2 - frameW;
+  const innerY = DOM_W/2 - frameW;
+  const framePlanes = [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+    new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+    new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+    new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+  ];
+  const frameShape = roundedRectShape(DOM_L, DOM_W, DOM_BEVEL);
+  const frameGeo = new THREE.ExtrudeGeometry(frameShape, {
+    depth: HOLE_DEPTH, bevelEnabled: true,
+    bevelThickness: DOM_BEVEL, bevelSize: DOM_BEVEL, bevelSegments: 3
+  });
+  frameGeo.translate(0, 0, splitZ - DOM_BEVEL);
+  const frameMat = new THREE.MeshPhongMaterial({
+    color: 0xFFFFF0, shininess: BODY_SHININESS, specular: bodySpecColor,
+    clippingPlanes: framePlanes, clipIntersection: true, clipShadows: true
+  });
+  const frame = new THREE.Mesh(frameGeo, frameMat);
+  frame.castShadow = true;
+  // Store local plane data for world-space transform after placement
+  frame._localPlaneData = { innerX, innerY };
+  pendingFrames.push(frame);
+  group.add(frame);
 
-  // 3. Colored concave pads — sit inside the holes, visible from above
-  const concaveGeo = createConcavePip(PIP_R - 0.2, CONCAVE_DEPTH, 20);
+  // LAYER 3: INNER SLAB — no bevel, clean holes
+  const innerShape = roundedRectShape(DOM_L - 2*frameW + 0.1, DOM_W - 2*frameW + 0.1, 0.5);
+  for (const pip of allPips) {
+    const hole = new THREE.Path();
+    hole.absarc(pip.x, pip.y, PIP_R, 0, Math.PI * 2, true);
+    innerShape.holes.push(hole);
+  }
+  const grooveHole = new THREE.Path();
+  grooveHole.moveTo(-gr, -gl);
+  grooveHole.lineTo(-gr, gl);
+  grooveHole.absarc(0, gl, gr, Math.PI, 0, true);
+  grooveHole.lineTo(gr, -gl);
+  grooveHole.absarc(0, -gl, gr, 0, Math.PI, true);
+  innerShape.holes.push(grooveHole);
+  const innerGeo = new THREE.ExtrudeGeometry(innerShape, { depth: HOLE_DEPTH, bevelEnabled: false });
+  innerGeo.translate(0, 0, splitZ);
+  const inner = new THREE.Mesh(innerGeo, domIvoryMat);
+  group.add(inner);
 
-  function addPips(val, xOffset) {
-    if (val === 0) return;
-    const pipMat = new THREE.MeshPhongMaterial({ color: pipColors[val] });
-    for (const name of pipLayouts[val]) {
-      const [px, py] = pipGrid[name];
-
-      // Dark hole cylinder (recessed into body)
-      const hole = new THREE.Mesh(holeGeo, holeMat);
-      hole.position.set(xOffset + px, py, topZ - HOLE_DEPTH/2 + 0.05);
-      group.add(hole);
-
-      // Colored pad at bottom of hole
-      const pad = new THREE.Mesh(concaveGeo, pipMat);
-      pad.position.set(xOffset + px, py, topZ - HOLE_DEPTH + 0.5);
-      group.add(pad);
+  // COLORED CONCAVE PIP INSERTS
+  for (const pip of allPips) {
+    const pipMat = new THREE.MeshPhongMaterial({
+      color: pipColors[pip.val], side: THREE.DoubleSide,
+      shininess: PIP_SHININESS, specular: pipSpecColor
+    });
+    const sphereR = (PIP_R * PIP_R + BOWL_DEPTH * BOWL_DEPTH) / (2 * BOWL_DEPTH);
+    const bowlAngle = Math.asin(Math.min(PIP_R / sphereR, 1));
+    const bowlGeo = new THREE.SphereGeometry(sphereR, 24, 16, 0, Math.PI * 2, Math.PI - bowlAngle, bowlAngle);
+    bowlGeo.scale(1, 1, -1);
+    const norms = bowlGeo.attributes.normal;
+    for (let i = 0; i < norms.count; i++) {
+      norms.setXYZ(i, -norms.getX(i), -norms.getY(i), -norms.getZ(i));
     }
+    norms.needsUpdate = true;
+    bowlGeo.rotateX(BOWL_ROT_X);
+    const bowl = new THREE.Mesh(bowlGeo, pipMat);
+    bowl.position.set(pip.x, pip.y, topZ - BOWL_DEPTH + sphereR);
+    group.add(bowl);
   }
 
-  addPips(leftVal, -DOM_L/4);
-  addPips(rightVal, DOM_L/4);
+  // BLACK INVERTED HALF-PILL GROOVE
+  const pillR = gr;
+  const troughGeo = new THREE.CylinderGeometry(pillR, pillR, GROOVE_LEN, 24, 1, true, 0, Math.PI);
+  troughGeo.rotateY(PILL_RY);
+  const trough = new THREE.Mesh(troughGeo, domBlackMat);
+  trough.position.set(0, 0, topZ);
+  group.add(trough);
 
-  // 4. Pill-shaped center groove running across width (along Y) at x=0
-  const gr = GROOVE_W / 2;
-  const gl = GROOVE_LEN / 2;
-  const groovePath = new THREE.Shape();
-  groovePath.moveTo(-gr, -gl);
-  groovePath.lineTo(-gr, gl);
-  groovePath.arc(gr, 0, gr, Math.PI, 0, true);
-  groovePath.lineTo(gr, -gl);
-  groovePath.arc(-gr, 0, gr, 0, Math.PI, true);
-  const grooveExtGeo = new THREE.ExtrudeGeometry(groovePath, {
-    depth: HOLE_DEPTH, bevelEnabled: false
-  });
-  const grooveMesh = new THREE.Mesh(grooveExtGeo, blackMat);
-  grooveMesh.position.z = topZ - HOLE_DEPTH + 0.05;
-  group.add(grooveMesh);
+  // Quarter-sphere end caps
+  const capGeoTop = new THREE.SphereGeometry(pillR, 24, 12, 0, Math.PI, 0, Math.PI / 2);
+  capGeoTop.rotateY(TC_RY);
+  const capTop = new THREE.Mesh(capGeoTop, domBlackMat);
+  capTop.position.set(0, gl, topZ);
+  group.add(capTop);
+
+  const capGeoBot = new THREE.SphereGeometry(pillR, 24, 12, 0, Math.PI, 0, Math.PI / 2);
+  capGeoBot.rotateY(BC_RY);
+  capGeoBot.rotateZ(BC_RZ);
+  const capBot = new THREE.Mesh(capGeoBot, domBlackMat);
+  capBot.position.set(0, -gl, topZ);
+  group.add(capBot);
 
   return group;
 }
@@ -325,10 +655,10 @@ function createDomino(leftVal, rightVal) {
 // ========== RACK ==========
 function createRack() {
   const group = new THREE.Group();
-  const rackLen = 170, rackDep = 29, baseH = 6;
-  const backH = 38, backT = 4;
+  const rackLen = 220, rackDep = 40, baseH = 6;
+  const backH = 45, backT = 4;
   const lipH = 8, lipT = 3;
-  const guardH = 58, guardT = 3, guardDep = 39;
+  const guardH = 85, guardT = 3, guardDep = 70;
   const leanRad = 12 * Math.PI / 180;
 
   // Base
@@ -340,7 +670,7 @@ function createRack() {
   // Back wall
   const backGeo = new THREE.BoxGeometry(rackLen, backT, backH);
   const back = new THREE.Mesh(backGeo, rackMat);
-  back.position.set(0, rackDep/2 - backT/2 - 12, baseH + backH/2);
+  back.position.set(0, rackDep/2 - backT/2 - 11, baseH + backH/2);
   back.rotation.x = -leanRad;
   group.add(back);
 
@@ -354,7 +684,7 @@ function createRack() {
   for (const side of [-1, 1]) {
     const guardGeo = new THREE.BoxGeometry(guardT, guardDep, guardH);
     const guard = new THREE.Mesh(guardGeo, rackMat);
-    guard.position.set(side * (rackLen/2 - guardT/2), -10, baseH + guardH/2);
+    guard.position.set(side * (rackLen/2 - guardT/2), -20, baseH + guardH/2);
     guard.rotation.x = -leanRad;
     group.add(guard);
   }
@@ -374,7 +704,406 @@ function createStandingDomino(leftVal, rightVal) {
 // ========== BUILD SCENE ==========
 scene.add(createTable());
 
-// Chairs — at flat edges (no 30° offset)
+// ========== ROOM ==========
+const ROOM_W = 5000, ROOM_D = 5000, ROOM_H = 2800;
+const FLOOR_Z_ACTUAL = -LEG_HEIGHT - 60; // match table leg bottom with apron
+
+function createRoom() {
+  const roomGroup = new THREE.Group();
+  const wallTex = createWoodTexture(74, 55, 40, 30);
+  wallTex.repeat.set(4, 2);
+  const wallMat = new THREE.MeshPhongMaterial({
+    color: 0x4a3728, shininess: 10, map: wallTex,
+    specular: new THREE.Color(0x111111), side: THREE.DoubleSide
+  });
+
+  const ceilMat = new THREE.MeshPhongMaterial({ color: 0x3a2a1a, shininess: 5, side: THREE.DoubleSide });
+  const baseMat = new THREE.MeshPhongMaterial({ color: 0x2a1a0a, shininess: 5 });
+
+  // Walls (thin boxes, reliable in Z-up)
+  const wallT = 20; // wall thickness
+  // +Y wall, -Y wall
+  for (const side of [1, -1]) {
+    const geo = new THREE.BoxGeometry(ROOM_W, wallT, ROOM_H);
+    const wall = new THREE.Mesh(geo, wallMat);
+    wall.position.set(0, side * ROOM_D/2, FLOOR_Z_ACTUAL + ROOM_H/2);
+    wall.receiveShadow = true;
+    roomGroup.add(wall);
+  }
+  // +X wall, -X wall
+  for (const side of [1, -1]) {
+    const geo = new THREE.BoxGeometry(wallT, ROOM_D, ROOM_H);
+    const wall = new THREE.Mesh(geo, wallMat);
+    wall.position.set(side * ROOM_W/2, 0, FLOOR_Z_ACTUAL + ROOM_H/2);
+    wall.receiveShadow = true;
+    roomGroup.add(wall);
+  }
+
+  // Ceiling
+  const ceilGeo = new THREE.BoxGeometry(ROOM_W, ROOM_D, 15);
+  const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+  ceiling.position.z = FLOOR_Z_ACTUAL + ROOM_H;
+  roomGroup.add(ceiling);
+
+  // Baseboards
+  const bbH = 60, bbD = 8;
+  const bbMat = new THREE.MeshPhongMaterial({ color: 0x1a0e05, shininess: 30 });
+  const bbSpecs = [
+    { pos: [0, ROOM_D/2 - bbD/2, FLOOR_Z_ACTUAL + bbH/2], rot: 0, len: ROOM_W },
+    { pos: [0, -ROOM_D/2 + bbD/2, FLOOR_Z_ACTUAL + bbH/2], rot: 0, len: ROOM_W },
+    { pos: [ROOM_W/2 - bbD/2, 0, FLOOR_Z_ACTUAL + bbH/2], rot: Math.PI/2, len: ROOM_D },
+    { pos: [-ROOM_W/2 + bbD/2, 0, FLOOR_Z_ACTUAL + bbH/2], rot: Math.PI/2, len: ROOM_D },
+  ];
+  for (const bb of bbSpecs) {
+    const geo = new THREE.BoxGeometry(bb.len, bbD, bbH);
+    const mesh = new THREE.Mesh(geo, bbMat);
+    mesh.position.set(...bb.pos);
+    mesh.rotation.z = bb.rot;
+    roomGroup.add(mesh);
+  }
+
+  return roomGroup;
+}
+scene.add(createRoom());
+
+// ========== CHANDELIER ==========
+function createChandelier() {
+  const cGroup = new THREE.Group();
+  const brassMat = new THREE.MeshPhongMaterial({
+    color: 0xb8860b, shininess: 80,
+    specular: new THREE.Color(0xffdd88)
+  });
+  const shadeMat = new THREE.MeshPhongMaterial({
+    color: 0x2a5a2a, shininess: 30, specular: new THREE.Color(0x224422),
+    side: THREE.DoubleSide
+  });
+
+  // Central rod
+  const rodGeo = new THREE.CylinderGeometry(8, 8, 400, 8);
+  rodGeo.rotateX(Math.PI / 2);
+  const rod = new THREE.Mesh(rodGeo, brassMat);
+  rod.position.z = 200;
+  cGroup.add(rod);
+
+  // Ceiling plate
+  const plateGeo = new THREE.CylinderGeometry(60, 60, 15, 16);
+  plateGeo.rotateX(Math.PI / 2);
+  const plate = new THREE.Mesh(plateGeo, brassMat);
+  plate.position.z = 400;
+  cGroup.add(plate);
+
+  // Main shade (wide cone, pool-table style)
+  const shadeGeo = new THREE.CylinderGeometry(350, 180, 80, 24, 1, true);
+  shadeGeo.rotateX(Math.PI / 2);
+  const shade = new THREE.Mesh(shadeGeo, shadeMat);
+  shade.position.z = -10;
+  cGroup.add(shade);
+
+  // Brass rim at bottom of shade
+  const rimGeo = new THREE.TorusGeometry(180, 6, 8, 24);
+  const rim = new THREE.Mesh(rimGeo, brassMat);
+  rim.position.z = -50;
+  cGroup.add(rim);
+
+  // Top rim
+  const topRimGeo = new THREE.TorusGeometry(350, 5, 8, 24);
+  const topRim = new THREE.Mesh(topRimGeo, brassMat);
+  topRim.position.z = 30;
+  cGroup.add(topRim);
+
+  // Decorative ball at bottom
+  const ballGeo = new THREE.SphereGeometry(15, 12, 12);
+  const ball = new THREE.Mesh(ballGeo, brassMat);
+  ball.position.z = -60;
+  cGroup.add(ball);
+
+  return cGroup;
+}
+const chandelier = createChandelier();
+chandelier.position.z = 1000;
+scene.add(chandelier);
+
+// ========== MANNEQUIN ==========
+function createMannequin(seatIndex) {
+  const mGroup = new THREE.Group();
+
+  const skinTones = [0xD2A77C, 0x8D5524, 0xC68642, 0xE0AC69, 0x6B4226, 0xF1C27D];
+  const shirtColors = [0x2244aa, 0xaa2233, 0x228844, 0x884488, 0xcc6622, 0x336688];
+  const hairColors = [0x1a1a1a, 0x3a2010, 0x8B4513, 0x2a1505, 0x111111, 0xb8860b];
+  const pantsColors = [0x2a2a3a, 0x3a2a1a, 0x1a3a2a, 0x2a2a4a, 0x3a3a2a, 0x2a1a3a];
+
+  const skinMat = new THREE.MeshPhongMaterial({
+    color: skinTones[seatIndex % 6], shininess: 25,
+    specular: new THREE.Color(0x222222)
+  });
+  const shirtMat = new THREE.MeshPhongMaterial({
+    color: shirtColors[seatIndex % 6], shininess: 15
+  });
+  const pantsMat = new THREE.MeshPhongMaterial({ color: pantsColors[seatIndex % 6], shininess: 10 });
+  const shoeMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a, shininess: 30 });
+  const hairMat = new THREE.MeshPhongMaterial({ color: hairColors[seatIndex % 6], shininess: 15 });
+  const eyeWhiteMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 60 });
+  const pupilMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 80 });
+  const lipMat = new THREE.MeshPhongMaterial({ color: 0xcc4444, shininess: 20 });
+
+  // Mannequin group at chair Z = -700. Floor at -760. Floor in local = -60.
+  // Chair seat top in local ≈ 460. Scale 1.3x applied at end.
+  // Build at 1x then scale — but hands/table positions are in world-ish coords,
+  // so I'll build at final size directly.
+
+  const S = 1.3; // scale factor
+  const floorZ = -60; // floor in local coords
+  const seatTop = 460; // chair seat surface in local
+  const hipZ = seatTop + 30 * S;
+
+  // === TORSO ===
+  const torsoH = 320 * S;
+  const torsoGeo = new THREE.CylinderGeometry(70 * S, 95 * S, torsoH, 12);
+  torsoGeo.rotateX(Math.PI / 2);
+  const torso = new THREE.Mesh(torsoGeo, shirtMat);
+  torso.position.set(0, 0, hipZ + torsoH / 2);
+  torso.rotation.y = 0.1;
+  mGroup.add(torso);
+
+  // === NECK ===
+  const neckZ = hipZ + torsoH;
+  const neckGeo = new THREE.CylinderGeometry(22 * S, 30 * S, 40 * S, 8);
+  neckGeo.rotateX(Math.PI / 2);
+  const neck = new THREE.Mesh(neckGeo, skinMat);
+  neck.position.set(-8, 0, neckZ + 20 * S);
+  mGroup.add(neck);
+
+  // === HEAD ===
+  const headR = 52 * S;
+  const headCX = -12, headCY = 0, headCZ = neckZ + 38 * S + headR;
+  const headGeo = new THREE.SphereGeometry(headR, 20, 16);
+  const head = new THREE.Mesh(headGeo, skinMat);
+  head.position.set(headCX, headCY, headCZ);
+  mGroup.add(head);
+
+  // === FACE — looking toward table (-X direction) ===
+  // Eyes
+  for (const side of [-1, 1]) {
+    // Eye white
+    const eyeGeo = new THREE.SphereGeometry(headR * 0.18, 10, 10);
+    const eye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
+    eye.position.set(headCX - headR * 0.75, headCY + side * headR * 0.3, headCZ + headR * 0.15);
+    mGroup.add(eye);
+    // Pupil
+    const pupilGeo = new THREE.SphereGeometry(headR * 0.1, 8, 8);
+    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+    pupil.position.set(headCX - headR * 0.9, headCY + side * headR * 0.3, headCZ + headR * 0.15);
+    mGroup.add(pupil);
+  }
+  // Nose
+  const noseGeo = new THREE.ConeGeometry(headR * 0.1, headR * 0.25, 6);
+  noseGeo.rotateX(Math.PI / 2);
+  noseGeo.rotateZ(Math.PI / 2);
+  const nose = new THREE.Mesh(noseGeo, skinMat);
+  nose.position.set(headCX - headR * 0.9, 0, headCZ - headR * 0.05);
+  mGroup.add(nose);
+  // Mouth
+  const mouthGeo = new THREE.TorusGeometry(headR * 0.15, headR * 0.04, 6, 12, Math.PI);
+  const mouth = new THREE.Mesh(mouthGeo, lipMat);
+  mouth.position.set(headCX - headR * 0.78, 0, headCZ - headR * 0.3);
+  mouth.rotation.y = Math.PI / 2;
+  mouth.rotation.z = Math.PI;
+  mGroup.add(mouth);
+
+  // === HAIR — varies by seat ===
+  const hairStyles = ['short', 'long', 'mohawk', 'bald', 'ponytail', 'curly'];
+  const hairStyle = hairStyles[seatIndex % 6];
+
+  if (hairStyle === 'short') {
+    const hGeo = new THREE.SphereGeometry(headR * 1.05, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55);
+    const hair = new THREE.Mesh(hGeo, hairMat);
+    hair.position.set(headCX, headCY, headCZ);
+    mGroup.add(hair);
+  } else if (hairStyle === 'long') {
+    const hGeo = new THREE.SphereGeometry(headR * 1.08, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6);
+    const hair = new THREE.Mesh(hGeo, hairMat);
+    hair.position.set(headCX, headCY, headCZ);
+    mGroup.add(hair);
+    // Back hair hanging down
+    const backGeo = new THREE.CylinderGeometry(headR * 0.5, headR * 0.3, headR * 1.5, 8);
+    backGeo.rotateX(Math.PI / 2);
+    const backHair = new THREE.Mesh(backGeo, hairMat);
+    backHair.position.set(headCX + headR * 0.4, 0, headCZ - headR * 0.5);
+    mGroup.add(backHair);
+  } else if (hairStyle === 'mohawk') {
+    for (let i = -3; i <= 3; i++) {
+      const mhGeo = new THREE.BoxGeometry(headR * 0.15, headR * 0.1, headR * 0.5);
+      const mh = new THREE.Mesh(mhGeo, hairMat);
+      mh.position.set(headCX + i * headR * 0.15, 0, headCZ + headR * 0.9);
+      mGroup.add(mh);
+    }
+  } else if (hairStyle === 'ponytail') {
+    const hGeo = new THREE.SphereGeometry(headR * 1.05, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55);
+    const hair = new THREE.Mesh(hGeo, hairMat);
+    hair.position.set(headCX, headCY, headCZ);
+    mGroup.add(hair);
+    const tailGeo = new THREE.CylinderGeometry(headR * 0.15, headR * 0.1, headR * 1.2, 6);
+    tailGeo.rotateX(Math.PI / 2);
+    const tail = new THREE.Mesh(tailGeo, hairMat);
+    tail.position.set(headCX + headR * 0.6, 0, headCZ + headR * 0.1);
+    tail.rotation.y = 0.5;
+    mGroup.add(tail);
+  } else if (hairStyle === 'curly') {
+    for (let i = 0; i < 25; i++) {
+      const phi = Math.random() * Math.PI * 0.6;
+      const theta = Math.random() * Math.PI * 2;
+      const cGeo = new THREE.SphereGeometry(headR * 0.18, 6, 6);
+      const curl = new THREE.Mesh(cGeo, hairMat);
+      curl.position.set(
+        headCX + headR * 1.0 * Math.sin(phi) * Math.cos(theta),
+        headCY + headR * 1.0 * Math.sin(phi) * Math.sin(theta),
+        headCZ + headR * 1.0 * Math.cos(phi)
+      );
+      mGroup.add(curl);
+    }
+  }
+  // 'bald' = no hair
+
+  // === HATS & ACCESSORIES — some seats get them ===
+  if (seatIndex === 0) {
+    // Cowboy hat
+    const brimGeo = new THREE.CylinderGeometry(headR * 1.6, headR * 1.7, headR * 0.12, 20);
+    brimGeo.rotateX(Math.PI / 2);
+    const brim = new THREE.Mesh(brimGeo, new THREE.MeshPhongMaterial({ color: 0x5c3a1e, shininess: 20 }));
+    brim.position.set(headCX, headCY, headCZ + headR * 0.85);
+    mGroup.add(brim);
+    const crownGeo = new THREE.CylinderGeometry(headR * 0.65, headR * 0.75, headR * 0.7, 12);
+    crownGeo.rotateX(Math.PI / 2);
+    const crown = new THREE.Mesh(crownGeo, new THREE.MeshPhongMaterial({ color: 0x5c3a1e, shininess: 20 }));
+    crown.position.set(headCX, headCY, headCZ + headR * 1.2);
+    mGroup.add(crown);
+  } else if (seatIndex === 2) {
+    // Baseball cap
+    const capGeo = new THREE.SphereGeometry(headR * 1.08, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.4);
+    const cap = new THREE.Mesh(capGeo, new THREE.MeshPhongMaterial({ color: 0xcc2222, shininess: 25 }));
+    cap.position.set(headCX, headCY, headCZ);
+    mGroup.add(cap);
+    // Bill
+    const billGeo = new THREE.CircleGeometry(headR * 0.7, 12, 0, Math.PI);
+    const bill = new THREE.Mesh(billGeo, new THREE.MeshPhongMaterial({ color: 0xcc2222, side: THREE.DoubleSide }));
+    bill.position.set(headCX - headR * 0.85, headCY, headCZ + headR * 0.5);
+    bill.rotation.y = Math.PI / 2;
+    bill.rotation.z = -0.3;
+    mGroup.add(bill);
+  } else if (seatIndex === 5) {
+    // Fedora
+    const fbrimGeo = new THREE.CylinderGeometry(headR * 1.35, headR * 1.4, headR * 0.1, 20);
+    fbrimGeo.rotateX(Math.PI / 2);
+    const fbrim = new THREE.Mesh(fbrimGeo, new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 40 }));
+    fbrim.position.set(headCX, headCY, headCZ + headR * 0.8);
+    mGroup.add(fbrim);
+    const fcrownGeo = new THREE.CylinderGeometry(headR * 0.5, headR * 0.7, headR * 0.55, 12);
+    fcrownGeo.rotateX(Math.PI / 2);
+    const fcrown = new THREE.Mesh(fcrownGeo, new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 40 }));
+    fcrown.position.set(headCX, headCY, headCZ + headR * 1.1);
+    mGroup.add(fcrown);
+  }
+
+  // === NECKLACE — seats 1 and 3 ===
+  if (seatIndex === 1 || seatIndex === 3) {
+    const necklaceGeo = new THREE.TorusGeometry(45 * S, 4 * S, 8, 24);
+    const necklaceMat = new THREE.MeshPhongMaterial({
+      color: seatIndex === 1 ? 0xffd700 : 0xc0c0c0,
+      shininess: 100, specular: new THREE.Color(0xffffff)
+    });
+    const necklace = new THREE.Mesh(necklaceGeo, necklaceMat);
+    necklace.position.set(-5, 0, neckZ + 5);
+    mGroup.add(necklace);
+  }
+
+  // === ARMS — chain: shoulder → upper arm → elbow → forearm → hand ===
+  const shoulderZ = hipZ + torsoH - 30 * S;
+  const shoulderSpread = 115 * S;
+
+  for (const side of [-1, 1]) {
+    const shX = -15, shY = side * shoulderSpread, shZ = shoulderZ;
+
+    const shoulderGeo = new THREE.SphereGeometry(32 * S, 10, 10);
+    const shoulder = new THREE.Mesh(shoulderGeo, shirtMat);
+    shoulder.position.set(shX, shY, shZ);
+    mGroup.add(shoulder);
+
+    // Elbow — above table
+    const elX = -200 * S, elY = side * 140 * S, elZ = 780;
+
+    const uArmLen = Math.sqrt((elX-shX)**2 + (elY-shY)**2 + (elZ-shZ)**2);
+    const uArmGeo = new THREE.CylinderGeometry(22 * S, 26 * S, uArmLen, 8);
+    const uArm = new THREE.Mesh(uArmGeo, shirtMat);
+    uArm.position.set((shX+elX)/2, (shY+elY)/2, (shZ+elZ)/2);
+    uArm.lookAt(new THREE.Vector3(elX, elY, elZ));
+    uArm.rotateX(Math.PI / 2);
+    mGroup.add(uArm);
+
+    const elbowGeo = new THREE.SphereGeometry(24 * S, 8, 8);
+    const elbow = new THREE.Mesh(elbowGeo, skinMat);
+    elbow.position.set(elX, elY, elZ);
+    mGroup.add(elbow);
+
+    // Hand on table, outside rack guards
+    const hdX = -365, hdY = side * 145, hdZ = 754 + 28;
+
+    const fArmLen = Math.sqrt((hdX-elX)**2 + (hdY-elY)**2 + (hdZ-elZ)**2);
+    const fArmGeo = new THREE.CylinderGeometry(18 * S, 22 * S, fArmLen, 8);
+    const fArm = new THREE.Mesh(fArmGeo, skinMat);
+    fArm.position.set((elX+hdX)/2, (elY+hdY)/2, (elZ+hdZ)/2);
+    fArm.lookAt(new THREE.Vector3(hdX, hdY, hdZ));
+    fArm.rotateX(Math.PI / 2);
+    mGroup.add(fArm);
+
+    const handGeo = new THREE.SphereGeometry(20 * S, 8, 8);
+    const hand = new THREE.Mesh(handGeo, skinMat);
+    hand.position.set(hdX, hdY, hdZ);
+    mGroup.add(hand);
+  }
+
+  // === LEGS — thighs flat on seat, shins down to floor ===
+  const thighLen = 280 * S;
+  for (const side of [-1, 1]) {
+    // Thigh — from hip forward along -X
+    const thighGeo = new THREE.CylinderGeometry(38 * S, 42 * S, thighLen, 10);
+    thighGeo.rotateX(Math.PI / 2);
+    const thigh = new THREE.Mesh(thighGeo, pantsMat);
+    thigh.position.set(-thighLen / 2 + 20, side * 80 * S, hipZ - 25 * S);
+    thigh.rotation.y = Math.PI / 2;
+    thigh.rotation.x = side * 0.04;
+    mGroup.add(thigh);
+
+    // Knee at front of thigh
+    const kneeX = -thighLen + 30;
+    const kneeY = side * 85 * S;
+    const kneeZ = hipZ - 30 * S;
+    const kneeGeo = new THREE.SphereGeometry(30 * S, 8, 8);
+    const knee = new THREE.Mesh(kneeGeo, pantsMat);
+    knee.position.set(kneeX, kneeY, kneeZ);
+    mGroup.add(knee);
+
+    // Shin — from knee down to floor
+    const footZ = floorZ + 30; // just above floor for shoe
+    const shinLen = kneeZ - footZ;
+    const shinGeo = new THREE.CylinderGeometry(26 * S, 24 * S, shinLen, 8);
+    shinGeo.rotateX(Math.PI / 2);
+    const shin = new THREE.Mesh(shinGeo, pantsMat);
+    shin.position.set(kneeX, kneeY, kneeZ - shinLen / 2);
+    mGroup.add(shin);
+
+    // Shoe on the floor
+    const shoe = new THREE.Mesh(
+      new THREE.BoxGeometry(120 * S, 60 * S, 40 * S),
+      shoeMat
+    );
+    shoe.position.set(kneeX - 25 * S, kneeY, floorZ + 20 * S);
+    mGroup.add(shoe);
+  }
+
+  return mGroup;
+}
+
+// Chairs + Mannequins — at flat edges
 const chairDist = APOTHEM + 80 + 225;
 for (let i = 0; i < 6; i++) {
   const angle = i * 60 * Math.PI / 180;
@@ -386,6 +1115,16 @@ for (let i = 0; i < 6; i++) {
   );
   chair.rotation.z = angle;
   scene.add(chair);
+
+  // Add mannequin in the chair
+  const mannequin = createMannequin(i);
+  mannequin.position.set(
+    chairDist * Math.cos(angle),
+    chairDist * Math.sin(angle),
+    -LEG_HEIGHT
+  );
+  mannequin.rotation.z = angle;
+  scene.add(mannequin);
 }
 
 // Hands
@@ -400,23 +1139,74 @@ const hands = [
 
 // Racks with dominoes — at flat edges (30° offset to match table)
 const rackDist = APOTHEM - 60;
+const allDomMeshes = [];
+const allBackWalls = [];
+const allGuards = [];
+const playerHand = [];       // seat 0's domino meshes (clickable)
+const seatDominoes = [];     // all seats: seatDominoes[seat] = [dom, dom, ...]
+const rackGroups = [];       // rackGroup per seat
+const playedDominoes = [];   // { dom, startPos, startRot, endPos, endRot, t, done }
+
+// Play spot positions — in front of each rack, backed toward center
+const TABLE_SURFACE_Z = TOP_THICKNESS + 6 + FELT_DEPTH + 1; // just above felt top
+let playSpotDist = rackDist - 250; // distance from table center (adjustable)
+let playScale = 2.0; // scale of dominoes when played on table (jumbo for visibility)
+let playRotOffset = 0; // extra rotation in degrees for play spots
+let playCenterOffset = 0; // shift play center toward player (positive = closer to player)
+const PLAYER_SEAT = 4;
+const RISE_HEIGHT = 120; // how high domino rises before flying
+
+const playSpots = [];
+function buildPlaySpots() {
+  playSpots.length = 0;
+  // Offset center toward player seat (240°)
+  const playerAngle = PLAYER_SEAT * 60 * Math.PI / 180;
+  const cx = playCenterOffset * Math.cos(playerAngle);
+  const cy = playCenterOffset * Math.sin(playerAngle);
+  for (let i = 0; i < 6; i++) {
+    const angle = i * 60 * Math.PI / 180;
+    playSpots.push({
+      x: cx + playSpotDist * Math.cos(angle),
+      y: cy + playSpotDist * Math.sin(angle),
+      z: TABLE_SURFACE_Z,
+      rotZ: angle + Math.PI / 2 + playRotOffset * Math.PI / 180
+    });
+  }
+}
+buildPlaySpots();
+
 for (let seat = 0; seat < 6; seat++) {
   const angle = seat * 60 * Math.PI / 180;
   const rackGroup = new THREE.Group();
 
   // Rack
   const rack = createRack();
+  // base=0, back=1, lip=2, guard=3, guard=4
+  allBackWalls.push(rack.children[1]);
+  allGuards.push(rack.children[3], rack.children[4]);
   rackGroup.add(rack);
 
   // 6 dominoes standing in rack
-  const tileSpacing = 25;
+  const seatDoms = [];
+  const tileSpacing = 34;
   const startX = -(5) * tileSpacing / 2;
   for (let ti = 0; ti < 6; ti++) {
     const [l, r] = hands[seat][ti];
     const dom = createStandingDomino(l, r);
-    dom.position.set(startX + ti * tileSpacing, 3, 6 + 24);
+    const origPos = new THREE.Vector3(startX + ti * tileSpacing, -7, 6 + 24);
+    dom.position.copy(origPos);
+    dom.userData.seat = seat;
+    dom.userData.tileIndex = ti;
+    dom.userData.played = false;
+    dom.userData.origPos = origPos;
+    dom.userData.origRot = dom.rotation.clone();
+    dom.userData.origScale = dom.scale.clone();
+    allDomMeshes.push(dom);
+    seatDoms.push(dom);
+    if (seat === 4) playerHand.push(dom);
     rackGroup.add(dom);
   }
+  seatDominoes.push(seatDoms);
 
   // Position rack on table
   rackGroup.position.set(
@@ -425,8 +1215,428 @@ for (let seat = 0; seat < 6; seat++) {
     TOP_THICKNESS
   );
   rackGroup.rotation.z = angle + Math.PI - Math.PI / 2;
+  rackGroups.push(rackGroup);
   scene.add(rackGroup);
 }
+
+// ========== PLAY DOMINO ==========
+function getWorldTransform(obj) {
+  obj.updateMatrixWorld(true);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  obj.getWorldPosition(pos);
+  obj.getWorldQuaternion(quat);
+  return { pos, quat };
+}
+
+function playDomino(dom) {
+  if (dom.userData.played) return;
+  dom.userData.played = true;
+
+  const seat = dom.userData.seat;
+  const spot = playSpots[seat];
+
+  // Get current world position/rotation before reparenting
+  const { pos: startPos, quat: startQuat } = getWorldTransform(dom);
+
+  // Reparent to scene so we can animate in world coords
+  dom.parent.remove(dom);
+  scene.add(dom);
+  dom.position.copy(startPos);
+  dom.quaternion.copy(startQuat);
+
+  // Mid-point: risen above rack, same XY
+  const midPos = startPos.clone();
+  midPos.z += RISE_HEIGHT;
+
+  // Target: flat on table at play spot, face up
+  const endPos = new THREE.Vector3(spot.x, spot.y, spot.z);
+  const endEuler = new THREE.Euler(0, 0, spot.rotZ, 'XYZ');
+  const endQuat = new THREE.Quaternion().setFromEuler(endEuler);
+
+  playedDominoes.push({
+    dom, startPos: startPos.clone(), startQuat: startQuat.clone(),
+    startScale: dom.scale.clone(),
+    endScale: new THREE.Vector3(playScale, playScale, playScale),
+    midPos, endPos, endQuat, t: 0, phase: 'rise', done: false
+  });
+}
+
+// ZXCVBN = play domino 1-6 from your hand (+ all other seats play sequentially)
+const playKeys = ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN'];
+let trickIndex = 0;
+let animSpeed = 1.0; // animation speed multiplier
+const playQueue = []; // queue of dominoes waiting to play sequentially
+let trickCollecting = false; // true while collecting trick to pile
+let trickPauseTimer = 0; // pause before collecting
+
+// Trick pile positions — at table corners between seats
+// Corner angles: 30°, 90°, 150°, 210°, 270°, 330°
+// For now, all tricks collect to the corner between seat 4 & 5 (270°)
+let trickCornerDeg = 270; // corner angle in degrees (adjustable)
+let trickPileDist = TABLE_RADIUS - 120; // distance from center (adjustable)
+let trickDomSpacing = 28; // side-by-side spacing (adjustable)
+function getTrickAngle() { return trickCornerDeg * Math.PI / 180; }
+let trickPileCount = 0; // how many tricks collected so far
+const collectQueue = []; // dominoes waiting to animate to trick pile
+
+// Current trick's dominoes (the 6 that were just played)
+let currentTrickDoms = [];
+
+window.addEventListener('keydown', (e) => {
+  const idx = playKeys.indexOf(e.code);
+  if (idx !== -1 && playerHand[idx] && !playerHand[idx].userData.played
+      && playQueue.length === 0 && collectQueue.length === 0 && !trickCollecting) {
+    // Clear current trick tracking
+    currentTrickDoms = [];
+    // Player goes first
+    playDomino(playerHand[idx]);
+    currentTrickDoms.push(playerHand[idx]);
+    // Queue up the other seats in order (seat after player, wrapping around)
+    for (let offset = 1; offset < 6; offset++) {
+      const seat = (PLAYER_SEAT + offset) % 6;
+      const seatDom = seatDominoes[seat][trickIndex];
+      if (seatDom && !seatDom.userData.played) {
+        playQueue.push(seatDom);
+        currentTrickDoms.push(seatDom);
+      }
+    }
+    trickIndex++;
+  }
+  // Animation speed: 9(-) 0(+)
+  if (e.code === 'Digit9') { animSpeed = Math.max(0.2, animSpeed - 0.2); animSpeedEl.textContent = animSpeed.toFixed(1); }
+  if (e.code === 'Digit0') { animSpeed = Math.min(3.0, animSpeed + 0.2); animSpeedEl.textContent = animSpeed.toFixed(1); }
+  // Play scale: 1(-) 2(+)
+  if (e.code === 'Digit1') { playScale = Math.max(0.2, playScale - 0.1); playScaleEl.textContent = playScale.toFixed(1); updatePreviewPositions(); }
+  if (e.code === 'Digit2') { playScale = Math.min(3.0, playScale + 0.1); playScaleEl.textContent = playScale.toFixed(1); updatePreviewPositions(); }
+  // Play distance: 3(-) 4(+)
+  if (e.code === 'Digit3') { playSpotDist -= 20; buildPlaySpots(); playDistEl.textContent = Math.round(playSpotDist); updatePreviewPositions(); }
+  if (e.code === 'Digit4') { playSpotDist += 20; buildPlaySpots(); playDistEl.textContent = Math.round(playSpotDist); updatePreviewPositions(); }
+  // Play rotation: 5(-) 6(+)
+  if (e.code === 'Digit5') { playRotOffset -= 5; buildPlaySpots(); playRotEl.textContent = playRotOffset; updatePreviewPositions(); }
+  if (e.code === 'Digit6') { playRotOffset += 5; buildPlaySpots(); playRotEl.textContent = playRotOffset; updatePreviewPositions(); }
+  // [ / ] = center offset toward/away from player
+  if (e.code === 'BracketLeft') { playCenterOffset += 20; buildPlaySpots(); centerOfsEl.textContent = playCenterOffset; updatePreviewPositions(); }
+  if (e.code === 'BracketRight') { playCenterOffset -= 20; buildPlaySpots(); centerOfsEl.textContent = playCenterOffset; updatePreviewPositions(); }
+  // - / = = trick pile angle
+  if (e.code === 'Minus') { trickCornerDeg -= 5; trickAngleEl.textContent = trickCornerDeg; updatePreviewPositions(); }
+  if (e.code === 'Equal') { trickCornerDeg += 5; trickAngleEl.textContent = trickCornerDeg; updatePreviewPositions(); }
+  // , / . = trick pile distance
+  if (e.code === 'Comma') { trickPileDist -= 20; trickDistEl.textContent = Math.round(trickPileDist); updatePreviewPositions(); }
+  if (e.code === 'Period') { trickPileDist += 20; trickDistEl.textContent = Math.round(trickPileDist); updatePreviewPositions(); }
+  // Q = toggle preview mode
+  if (e.code === 'KeyQ') { togglePreview(); }
+  // ` (backquote) with shift = render scale up, without shift = render scale down
+  if (e.code === 'Backquote') {
+    if (e.shiftKey) {
+      renderScale = Math.min(4.0, renderScale + 0.5);
+    } else {
+      renderScale = Math.max(0.5, renderScale - 0.5);
+    }
+    renderer.setPixelRatio(renderScale);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderScaleEl.textContent = renderScale.toFixed(1);
+  }
+});
+
+function startTrickCollection() {
+  trickCollecting = true;
+  trickPauseTimer = 1.0; // 1 second pause before collecting
+
+  // Calculate trick pile positions — 6 dominoes side-by-side, flat
+  const cornerX = trickPileDist * Math.cos(getTrickAngle());
+  const cornerY = trickPileDist * Math.sin(getTrickAngle());
+  const pileRotZ = getTrickAngle(); // align along the corner direction
+  // Offset rows for multiple tricks
+  const rowOffset = trickPileCount * 60; // each trick row spaced apart
+  const perpX = Math.cos(getTrickAngle() + Math.PI / 2);
+  const perpY = Math.sin(getTrickAngle() + Math.PI / 2);
+  const baseX = cornerX + perpX * (rowOffset - 150);
+  const baseY = cornerY + perpY * (rowOffset - 150);
+
+  // Along-corner direction for side-by-side spacing
+  const alongX = Math.cos(getTrickAngle());
+  const alongY = Math.sin(getTrickAngle());
+  const startOffset = -(currentTrickDoms.length - 1) * trickDomSpacing / 2;
+
+  for (let i = 0; i < currentTrickDoms.length; i++) {
+    const dom = currentTrickDoms[i];
+    const targetX = baseX + alongX * (startOffset + i * trickDomSpacing);
+    const targetY = baseY + alongY * (startOffset + i * trickDomSpacing);
+    collectQueue.push({
+      dom,
+      startPos: dom.position.clone(),
+      startQuat: dom.quaternion.clone(),
+      startScale: dom.scale.clone(),
+      endScale: new THREE.Vector3(1, 1, 1), // shrink back to normal for pile
+      endPos: new THREE.Vector3(targetX, targetY, TABLE_SURFACE_Z),
+      endQuat: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, pileRotZ + Math.PI / 2)),
+      t: 0,
+      done: false
+    });
+  }
+  trickPileCount++;
+}
+
+// ========== RESET ALL DOMINOES ==========
+function resetAllDominoes() {
+  // Return every domino to its original rack position
+  for (let seat = 0; seat < 6; seat++) {
+    for (const dom of seatDominoes[seat]) {
+      // Remove from scene if it was reparented
+      if (dom.parent === scene) {
+        scene.remove(dom);
+      }
+      // Re-add to its rack group
+      rackGroups[seat].add(dom);
+      // Restore original local transform
+      dom.position.copy(dom.userData.origPos);
+      dom.rotation.copy(dom.userData.origRot);
+      dom.scale.copy(dom.userData.origScale);
+      dom.userData.played = false;
+    }
+  }
+  // Reset all state
+  trickIndex = 0;
+  trickPileCount = 0;
+  playedDominoes.length = 0;
+  playQueue.length = 0;
+  collectQueue.length = 0;
+  currentTrickDoms = [];
+  trickCollecting = false;
+
+  // Rebuild clipping planes for all dominoes back in racks
+  scene.updateMatrixWorld(true);
+  for (const frame of pendingFrames) {
+    const { innerX, innerY } = frame._localPlaneData;
+    const localPlanes = [
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+      new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+      new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+    ];
+    for (const plane of localPlanes) {
+      plane.applyMatrix4(frame.matrixWorld);
+    }
+    frame.material.clippingPlanes = localPlanes;
+  }
+}
+
+// ========== PREVIEW MODE (Q to toggle) ==========
+let previewMode = false;
+const previewPlayDoms = [];  // 6 ghost dominoes at play spots
+const previewPileDoms = [];  // 6 ghost dominoes in trick pile
+
+// Create 12 preview dominoes (semi-transparent)
+function createPreviewDomino(leftVal, rightVal) {
+  const dom = createDomino(leftVal, rightVal);
+  dom.traverse((child) => {
+    if (child.isMesh && child.material) {
+      child.material = child.material.clone();
+      child.material.transparent = true;
+      child.material.opacity = 0.6;
+    }
+  });
+  return dom;
+}
+
+// Build preview dominoes once
+const previewHands = [[5,5],[5,3],[5,2],[5,0],[5,1],[5,7]];
+for (let i = 0; i < 6; i++) {
+  const [l, r] = previewHands[i];
+  const playDom = createPreviewDomino(l, r);
+  playDom.visible = false;
+  scene.add(playDom);
+  previewPlayDoms.push(playDom);
+
+  const pileDom = createPreviewDomino(l, r);
+  pileDom.visible = false;
+  scene.add(pileDom);
+  previewPileDoms.push(pileDom);
+}
+
+function updatePreviewPositions() {
+  if (!previewMode) return;
+
+  // Update play spot previews
+  buildPlaySpots();
+  for (let i = 0; i < 6; i++) {
+    const spot = playSpots[i];
+    const dom = previewPlayDoms[i];
+    dom.visible = true;
+    dom.position.set(spot.x, spot.y, spot.z);
+    dom.rotation.set(0, 0, spot.rotZ);
+    dom.scale.set(playScale, playScale, playScale);
+  }
+
+  // Update trick pile previews
+  const cornerX = trickPileDist * Math.cos(getTrickAngle());
+  const cornerY = trickPileDist * Math.sin(getTrickAngle());
+  const pileRotZ = getTrickAngle();
+  const perpX = Math.cos(getTrickAngle() + Math.PI / 2);
+  const perpY = Math.sin(getTrickAngle() + Math.PI / 2);
+  const baseX = cornerX + perpX * (0 - 150); // first row
+  const baseY = cornerY + perpY * (0 - 150);
+  const alongX = Math.cos(getTrickAngle());
+  const alongY = Math.sin(getTrickAngle());
+  const startOffset = -5 * trickDomSpacing / 2;
+
+  for (let i = 0; i < 6; i++) {
+    const dom = previewPileDoms[i];
+    dom.visible = true;
+    const tx = baseX + alongX * (startOffset + i * trickDomSpacing);
+    const ty = baseY + alongY * (startOffset + i * trickDomSpacing);
+    dom.position.set(tx, ty, TABLE_SURFACE_Z);
+    dom.rotation.set(0, 0, pileRotZ + Math.PI / 2);
+    dom.scale.set(1, 1, 1);
+  }
+
+  // Update clipping planes for preview dominoes
+  scene.updateMatrixWorld(true);
+  for (const dom of [...previewPlayDoms, ...previewPileDoms]) {
+    dom.traverse((child) => {
+      if (child._localPlaneData) {
+        const { innerX, innerY } = child._localPlaneData;
+        const localPlanes = [
+          new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+          new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+          new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+          new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+        ];
+        for (const plane of localPlanes) {
+          plane.applyMatrix4(child.matrixWorld);
+        }
+        child.material.clippingPlanes = localPlanes;
+      }
+    });
+  }
+}
+
+function togglePreview() {
+  previewMode = !previewMode;
+  if (previewMode) {
+    updatePreviewPositions();
+  } else {
+    for (const dom of [...previewPlayDoms, ...previewPileDoms]) {
+      dom.visible = false;
+    }
+  }
+}
+
+// ========== UPDATE CLIPPING PLANES TO WORLD SPACE ==========
+// Clipping planes are defined in local domino space — transform them
+// to world space so they work correctly on rotated/positioned dominoes
+scene.updateMatrixWorld(true);
+for (const frame of pendingFrames) {
+  const { innerX, innerY } = frame._localPlaneData;
+  const localPlanes = [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+    new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+    new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+    new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+  ];
+  const worldMatrix = frame.matrixWorld;
+  for (const plane of localPlanes) {
+    plane.applyMatrix4(worldMatrix);
+  }
+  frame.material.clippingPlanes = localPlanes;
+}
+
+// ========== SLIDER CONTROLS ==========
+// Adjustment state
+let domYCur = -8, domZCur = 32, backYCur = -5, fovCur = 60;
+const domYEl = document.getElementById('domYVal');
+const domZEl = document.getElementById('domZVal');
+const backYEl = document.getElementById('backYVal');
+const fovEl = document.getElementById('fovVal');
+const camInfoEl = document.getElementById('camInfo');
+const animSpeedEl = document.getElementById('animSpeedVal');
+const playScaleEl = document.getElementById('playScaleVal');
+const playDistEl = document.getElementById('playDistVal');
+const playRotEl = document.getElementById('playRotVal');
+const centerOfsEl = document.getElementById('centerOfsVal');
+const trickAngleEl = document.getElementById('trickAngleVal');
+const trickDistEl = document.getElementById('trickDistVal');
+const renderScaleEl = document.getElementById('renderScaleVal');
+renderScaleEl.textContent = renderScale.toFixed(1);
+const copyMsgEl = document.getElementById('copyMsg');
+
+function updateRackPositions() {
+  domYEl.textContent = domYCur;
+  domZEl.textContent = domZCur;
+  backYEl.textContent = backYCur;
+  for (const dom of allDomMeshes) {
+    dom.position.y = domYCur;
+    dom.position.z = domZCur;
+  }
+  for (const back of allBackWalls) {
+    back.position.y = 7 + backYCur;
+  }
+  scene.updateMatrixWorld(true);
+  for (const frame of pendingFrames) {
+    const { innerX, innerY } = frame._localPlaneData;
+    const localPlanes = [
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+      new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+      new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+    ];
+    for (const plane of localPlanes) {
+      plane.applyMatrix4(frame.matrixWorld);
+    }
+    frame.material.clippingPlanes = localPlanes;
+  }
+}
+
+function updateFOV() {
+  fovEl.textContent = fovCur;
+  camera.fov = fovCur;
+  camera.updateProjectionMatrix();
+}
+
+// Hotkeys: FGHT = dom, JKLI = back/guards, 7/8 = FOV, P = copy cam
+window.addEventListener('keydown', (e) => {
+  switch (e.code) {
+    // Dom Y: F(-) H(+)
+    case 'KeyF': domYCur--; updateRackPositions(); break;
+    case 'KeyH': domYCur++; updateRackPositions(); break;
+    // Dom Z: G(-) T(+)
+    case 'KeyG': domZCur--; updateRackPositions(); break;
+    case 'KeyT': domZCur++; updateRackPositions(); break;
+    // Back Y: J(-) L(+)
+    case 'KeyJ': backYCur--; updateRackPositions(); break;
+    case 'KeyL': backYCur++; updateRackPositions(); break;
+    // K = toggle back wall
+    case 'KeyK':
+      for (const b of allBackWalls) b.visible = !b.visible;
+      break;
+    // I = toggle side guards
+    case 'KeyI':
+      for (const g of allGuards) g.visible = !g.visible;
+      break;
+    // FOV: 7(-) 8(+)
+    case 'Digit7': fovCur = Math.max(20, fovCur - 2); updateFOV(); break;
+    case 'Digit8': fovCur = Math.min(100, fovCur + 2); updateFOV(); break;
+    // P = copy camera position to clipboard
+    case 'KeyP':
+      const camStr = `camera.position.set(${Math.round(camera.position.x)}, ${Math.round(camera.position.y)}, ${Math.round(camera.position.z)}); // yaw=${Math.round(yaw*180/Math.PI)}° pitch=${Math.round(pitch*180/Math.PI)}° fov=${fovCur}`;
+      navigator.clipboard.writeText(camStr).then(() => {
+        copyMsgEl.style.display = 'block';
+        copyMsgEl.textContent = 'Copied: ' + camStr;
+        setTimeout(() => copyMsgEl.style.display = 'none', 3000);
+      });
+      break;
+    // O = copy adjustment values to clipboard
+    case 'KeyO':
+      const adjStr = `domY=${domYCur} domZ=${domZCur} backY=${backYCur} fov=${fovCur}`;
+      navigator.clipboard.writeText(adjStr).then(() => {
+        copyMsgEl.style.display = 'block';
+        copyMsgEl.textContent = 'Copied: ' + adjStr;
+        setTimeout(() => copyMsgEl.style.display = 'none', 3000);
+      });
+      break;
+  }
+});
 
 // ========== ANIMATION LOOP ==========
 function animate() {
@@ -459,6 +1669,138 @@ function animate() {
     // Raise/lower perspective
     if (moveState.up) camera.position.z += speed;
     if (moveState.down) camera.position.z -= speed;
+
+    // Room bounds
+    const margin = 100;
+    camera.position.x = Math.max(-ROOM_W/2 + margin, Math.min(ROOM_W/2 - margin, camera.position.x));
+    camera.position.y = Math.max(-ROOM_D/2 + margin, Math.min(ROOM_D/2 - margin, camera.position.y));
+    camera.position.z = Math.max(FLOOR_Z_ACTUAL + 100, Math.min(FLOOR_Z_ACTUAL + ROOM_H - 50, camera.position.z));
+  }
+
+  // Process play queue — play next domino after current one lands
+  if (playQueue.length > 0) {
+    const allDone = playedDominoes.every(a => a.done);
+    if (allDone) {
+      const nextDom = playQueue.shift();
+      playDomino(nextDom);
+    }
+  }
+
+  // Check if all 6 played and landed — start trick collection
+  if (!trickCollecting && playQueue.length === 0 && currentTrickDoms.length === 6) {
+    const allLanded = playedDominoes.every(a => a.done);
+    if (allLanded) {
+      startTrickCollection();
+    }
+  }
+
+  // Trick collection pause then animate
+  if (trickCollecting) {
+    if (trickPauseTimer > 0) {
+      trickPauseTimer -= delta;
+    } else {
+      // Animate collect queue
+      let collectDone = true;
+      for (const anim of collectQueue) {
+        if (anim.done) continue;
+        collectDone = false;
+        anim.t += delta * 1.5 * animSpeed;
+        if (anim.t >= 1) { anim.t = 1; anim.done = true; }
+        const t = 1 - Math.pow(1 - anim.t, 3);
+        anim.dom.position.lerpVectors(anim.startPos, anim.endPos, t);
+        anim.dom.quaternion.slerpQuaternions(anim.startQuat, anim.endQuat, t);
+        anim.dom.scale.lerpVectors(anim.startScale, anim.endScale, t);
+      }
+      if (collectDone && collectQueue.length > 0) {
+        // Trick collection done — reset for next trick
+        trickCollecting = false;
+        collectQueue.length = 0;
+        currentTrickDoms = [];
+        // Clear played animations so next trick can start fresh
+        playedDominoes.length = 0;
+
+        // If all 6 tricks played, reset the whole hand
+        if (trickIndex >= 6) {
+          resetAllDominoes();
+        }
+      }
+    }
+  }
+
+  // Animate played dominoes (two-phase: rise then fly)
+  let anyAnimating = false;
+  for (const anim of playedDominoes) {
+    if (anim.done) continue;
+    anyAnimating = true;
+    anim.t += delta * 1.5 * animSpeed;
+
+    if (anim.phase === 'rise') {
+      // Phase 1: rise straight up to clear rack
+      const riseT = Math.min(anim.t / 0.3, 1);
+      const eased = 1 - Math.pow(1 - riseT, 2);
+      anim.dom.position.lerpVectors(anim.startPos, anim.midPos, eased);
+      anim.dom.quaternion.copy(anim.startQuat);
+      if (anim.t >= 0.3) {
+        anim.phase = 'fly';
+        anim.flyStart = anim.midPos.clone();
+        anim.flyQuatStart = anim.startQuat.clone();
+      }
+    } else {
+      // Phase 2: fly from mid to play spot, rotating to flat, scaling
+      const flyT = Math.min((anim.t - 0.3) / 0.7, 1);
+      const eased = 1 - Math.pow(1 - flyT, 3);
+      anim.dom.position.lerpVectors(anim.flyStart, anim.endPos, eased);
+      anim.dom.quaternion.slerpQuaternions(anim.flyQuatStart, anim.endQuat, eased);
+      anim.dom.scale.lerpVectors(anim.startScale, anim.endScale, eased);
+      if (flyT >= 1) {
+        anim.done = true;
+      }
+    }
+  }
+  // Also check if collecting is animating
+  const anyCollecting = collectQueue.some(a => !a.done);
+
+  // Update clipping planes for animating dominoes
+  if (anyAnimating || anyCollecting) {
+    scene.updateMatrixWorld(true);
+    for (const anim of playedDominoes) {
+      if (anim.done && anim.clipsUpdated) continue;
+      anim.dom.traverse((child) => {
+        if (child._localPlaneData) {
+          const { innerX, innerY } = child._localPlaneData;
+          const localPlanes = [
+            new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+            new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+            new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+            new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+          ];
+          for (const plane of localPlanes) {
+            plane.applyMatrix4(child.matrixWorld);
+          }
+          child.material.clippingPlanes = localPlanes;
+        }
+      });
+      if (anim.done) anim.clipsUpdated = true;
+    }
+    for (const anim of collectQueue) {
+      if (anim.done && anim.clipsUpdated) continue;
+      anim.dom.traverse((child) => {
+        if (child._localPlaneData) {
+          const { innerX, innerY } = child._localPlaneData;
+          const localPlanes = [
+            new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+            new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+            new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+            new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+          ];
+          for (const plane of localPlanes) {
+            plane.applyMatrix4(child.matrixWorld);
+          }
+          child.material.clippingPlanes = localPlanes;
+        }
+      });
+      if (anim.done) anim.clipsUpdated = true;
+    }
   }
 
   // Update camera look direction from yaw/pitch
@@ -470,6 +1812,9 @@ function animate() {
     camera.position.y + lookY,
     camera.position.z + lookZ
   );
+
+  // Update camera info display
+  camInfoEl.textContent = `Cam: ${Math.round(camera.position.x)}, ${Math.round(camera.position.y)}, ${Math.round(camera.position.z)} | Yaw: ${Math.round(yaw * 180 / Math.PI)}° Pitch: ${Math.round(pitch * 180 / Math.PI)}°`;
 
   renderer.render(scene, camera);
 }

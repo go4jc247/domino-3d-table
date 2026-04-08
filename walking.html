@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Walking Mannequin</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #1a1a2e; }
+    canvas { display: block; }
+    #info {
+      position: absolute; top: 10px; left: 10px; color: #ccc;
+      font: 14px monospace; background: rgba(0,0,0,0.5); padding: 8px 12px;
+      border-radius: 6px; pointer-events: none;
+    }
+    #controls {
+      position: absolute; bottom: 10px; left: 10px; color: #ccc;
+      font: 13px monospace; background: rgba(0,0,0,0.5); padding: 8px 12px;
+      border-radius: 6px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="info">Walking Mannequin</div>
+<div id="controls">
+  Drag: orbit | Scroll: zoom | 1-6: change character | R: restart
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+
+// === SCENE SETUP ===
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+scene.fog = new THREE.Fog(0x1a1a2e, 2000, 5000);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 10000);
+camera.position.set(400, -600, 300);
+camera.up.set(0, 0, 1); // Z-up
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// === LIGHTING ===
+const hemi = new THREE.HemisphereLight(0x88aacc, 0x444422, 0.6);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffeedd, 1.0);
+sun.position.set(300, -200, 800);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -800;
+sun.shadow.camera.right = 800;
+sun.shadow.camera.top = 800;
+sun.shadow.camera.bottom = -800;
+sun.shadow.camera.near = 100;
+sun.shadow.camera.far = 2000;
+scene.add(sun);
+
+const fill = new THREE.PointLight(0x4488cc, 0.3, 2000);
+fill.position.set(-400, 300, 200);
+scene.add(fill);
+
+// === GROUND ===
+const groundGeo = new THREE.PlaneGeometry(4000, 4000);
+const groundCanvas = document.createElement('canvas');
+groundCanvas.width = 512; groundCanvas.height = 512;
+const gCtx = groundCanvas.getContext('2d');
+// Subtle grid pattern
+gCtx.fillStyle = '#2a2a3e';
+gCtx.fillRect(0, 0, 512, 512);
+gCtx.strokeStyle = '#3a3a4e';
+gCtx.lineWidth = 1;
+for (let i = 0; i <= 512; i += 32) {
+  gCtx.beginPath(); gCtx.moveTo(i, 0); gCtx.lineTo(i, 512); gCtx.stroke();
+  gCtx.beginPath(); gCtx.moveTo(0, i); gCtx.lineTo(512, i); gCtx.stroke();
+}
+const groundTex = new THREE.CanvasTexture(groundCanvas);
+groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+groundTex.repeat.set(8, 8);
+const groundMat = new THREE.MeshPhongMaterial({ map: groundTex, shininess: 5 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.receiveShadow = true;
+scene.add(ground);
+
+// === MANNEQUIN BUILDER (articulated for animation) ===
+const skinTones = [0xD2A77C, 0x8D5524, 0xC68642, 0xE0AC69, 0x6B4226, 0xF1C27D];
+const shirtColors = [0x8B4513, 0xcc2222, 0x2255aa, 0x2a5a2a, 0xcc8844, 0x884422];
+const hairColors = [0x3a2010, 0x1a1a1a, 0x8B4513, 0x554433, 0x2a1505, 0x111111];
+const pantsColors = [0x2a2a3a, 0x3a2a1a, 0x1a3a2a, 0x2a2a4a, 0x3a3a2a, 0x2a1a3a];
+// Country/western styles: cowboy, rancher, trucker, slick, buzzcut, straw
+const hairStyles = ['cowboy', 'rancher', 'trucker', 'slick', 'buzzcut', 'straw'];
+
+function createWalkingMannequin(charIndex) {
+  const root = new THREE.Group();
+  // Skeleton joint groups for animation
+  const joints = {};
+
+  const ci = charIndex % 6;
+  const skinMat = new THREE.MeshPhongMaterial({ color: skinTones[ci], shininess: 25, specular: new THREE.Color(0x222222) });
+  const shirtMat = new THREE.MeshPhongMaterial({ color: shirtColors[ci], shininess: 15 });
+  const pantsMat = new THREE.MeshPhongMaterial({ color: pantsColors[ci], shininess: 10 });
+  const shoeMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a, shininess: 30 });
+  const hairMat = new THREE.MeshPhongMaterial({ color: hairColors[ci], shininess: 15 });
+  const eyeWhiteMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 60 });
+  const pupilMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 80 });
+  const lipMat = new THREE.MeshPhongMaterial({ color: 0xcc4444, shininess: 20 });
+
+  // Dimensions (standing upright, Z-up)
+  const footH = 15;
+  const shoeLen = 50;
+  const shinLen = 160;
+  const thighLen = 155;
+  const torsoH = 190;
+  const neckH = 25;
+  const headR = 42;
+  const shoulderW = 75;
+  const upperArmLen = 120;
+  const forearmLen = 110;
+
+  // Total height check: foot(15) + shin(160) + thigh(155) + torso(190) + neck(25) + head(84) ≈ 629
+  const hipZ = footH + shinLen + thighLen;
+  const shoulderZ = hipZ + torsoH;
+  const neckZ = shoulderZ;
+  const headZ = neckZ + neckH + headR;
+
+  // === BODY PIVOT (for lean/bob) ===
+  const bodyPivot = new THREE.Group();
+  bodyPivot.position.z = hipZ;
+  root.add(bodyPivot);
+  joints.body = bodyPivot;
+
+  // --- TORSO ---
+  const torsoGeo = new THREE.CylinderGeometry(32, 42, torsoH, 12);
+  torsoGeo.rotateX(Math.PI / 2);
+  const torso = new THREE.Mesh(torsoGeo, shirtMat);
+  torso.position.z = torsoH / 2;
+  torso.castShadow = true;
+  bodyPivot.add(torso);
+
+  // --- NECK ---
+  const neckGeo = new THREE.CylinderGeometry(14, 18, neckH, 8);
+  neckGeo.rotateX(Math.PI / 2);
+  const neck = new THREE.Mesh(neckGeo, skinMat);
+  neck.position.z = torsoH + neckH / 2;
+  neck.castShadow = true;
+  bodyPivot.add(neck);
+
+  // --- HEAD ---
+  const headGroup = new THREE.Group();
+  headGroup.position.z = torsoH + neckH + headR;
+  bodyPivot.add(headGroup);
+  joints.head = headGroup;
+
+  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(headR, 20, 16), skinMat);
+  headMesh.castShadow = true;
+  headGroup.add(headMesh);
+
+  // Face — looking in +X direction (walking direction)
+  for (const side of [-1, 1]) {
+    const eyeGeo = new THREE.SphereGeometry(headR * 0.18, 10, 10);
+    const eye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
+    eye.position.set(headR * 0.75, side * headR * 0.3, headR * 0.15);
+    headGroup.add(eye);
+    const pupilGeo = new THREE.SphereGeometry(headR * 0.1, 8, 8);
+    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+    pupil.position.set(headR * 0.9, side * headR * 0.3, headR * 0.15);
+    headGroup.add(pupil);
+  }
+  // Nose
+  const noseGeo = new THREE.ConeGeometry(headR * 0.1, headR * 0.25, 6);
+  noseGeo.rotateZ(-Math.PI / 2);
+  const nose = new THREE.Mesh(noseGeo, skinMat);
+  nose.position.set(headR * 0.92, 0, -headR * 0.05);
+  headGroup.add(nose);
+  // Mouth
+  const mouthGeo = new THREE.TorusGeometry(headR * 0.15, headR * 0.04, 6, 12, Math.PI);
+  const mouth = new THREE.Mesh(mouthGeo, lipMat);
+  mouth.position.set(headR * 0.78, 0, -headR * 0.3);
+  mouth.rotation.y = -Math.PI / 2;
+  mouth.rotation.z = Math.PI;
+  headGroup.add(mouth);
+
+  // === HAIR & HATS — Country/Western themed ===
+  const hairStyle = hairStyles[ci];
+
+  // Short cropped hair (used by most characters under hats)
+  function addShortHair() {
+    const hGeo = new THREE.SphereGeometry(headR * 1.04, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.38);
+    hGeo.rotateX(Math.PI / 2);
+    headGroup.add(new THREE.Mesh(hGeo, hairMat));
+  }
+
+  // Slicked-back hair — flat on top, extends down back of head
+  function addSlickedHair() {
+    const hGeo = new THREE.SphereGeometry(headR * 1.04, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.38);
+    hGeo.rotateX(Math.PI / 2);
+    headGroup.add(new THREE.Mesh(hGeo, hairMat));
+    // Slicked back portion
+    const backGeo = new THREE.CylinderGeometry(headR * 0.45, headR * 0.25, headR * 0.9, 8);
+    backGeo.rotateX(Math.PI / 2);
+    const backHair = new THREE.Mesh(backGeo, hairMat);
+    backHair.position.set(-headR * 0.5, 0, -headR * 0.1);
+    headGroup.add(backHair);
+  }
+
+  // Buzz cut — very tight to head
+  function addBuzzCut() {
+    const hGeo = new THREE.SphereGeometry(headR * 1.02, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.35);
+    hGeo.rotateX(Math.PI / 2);
+    const buzzMat = new THREE.MeshPhongMaterial({ color: hairColors[ci], shininess: 5 });
+    headGroup.add(new THREE.Mesh(hGeo, buzzMat));
+  }
+
+  // Helper: cowboy hat with saddle-shaped brim (up on sides, down front/back)
+  function addCowboyHat(hatColor, bandColor, brimW, crownH, tiltBack) {
+    // tiltBack: 0 = straight on, positive = tilted back (casual/friendly), negative = pulled forward (mysterious)
+    tiltBack = tiltBack || 0;
+    const hatGroup = new THREE.Group();
+    headGroup.add(hatGroup);
+    // Tilt around Y axis — positive tips back, negative tips forward over eyes
+    hatGroup.rotation.y = -tiltBack; // negate: +Y rotation tips front down, so flip for intuitive tiltBack
+
+    const hatMat = new THREE.MeshPhongMaterial({ color: hatColor, shininess: 20, side: THREE.DoubleSide });
+    const brimBase = headR * 0.45;
+    const outerR = headR * brimW;
+    const innerR = headR * 1.08;
+    const brimDip = headR * 0.35;
+    const brimThick = headR * 0.1; // thickness of brim
+
+    // Saddle displacement function
+    function saddleZ(x, y, r) {
+      if (r < innerR) return 0;
+      const t = (r - innerR) / (outerR - innerR);
+      return ((y * y - x * x) / (outerR * outerR)) * brimDip * t;
+    }
+
+    // Build thick brim: top surface, bottom surface, outer edge
+    // Top surface
+    const res = 24;
+    const brimTopGeo = new THREE.PlaneGeometry(outerR * 2, outerR * 2, res, res);
+    const topPos = brimTopGeo.attributes.position;
+    for (let i = 0; i < topPos.count; i++) {
+      let x = topPos.getX(i), y = topPos.getY(i);
+      const r = Math.sqrt(x * x + y * y);
+      const angle = Math.atan2(y, x);
+      if (r > outerR) { x = outerR * Math.cos(angle); y = outerR * Math.sin(angle); topPos.setX(i, x); topPos.setY(i, y); }
+      else if (r < innerR) { x = innerR * Math.cos(angle); y = innerR * Math.sin(angle); topPos.setX(i, x); topPos.setY(i, y); }
+      topPos.setZ(i, saddleZ(x, y, Math.sqrt(x*x+y*y)) + brimThick / 2);
+    }
+    brimTopGeo.computeVertexNormals();
+    const topMesh = new THREE.Mesh(brimTopGeo, hatMat);
+    topMesh.position.z = brimBase;
+    topMesh.castShadow = true;
+    hatGroup.add(topMesh);
+
+    // Bottom surface
+    const botGeo = new THREE.PlaneGeometry(outerR * 2, outerR * 2, res, res);
+    const botPos = botGeo.attributes.position;
+    for (let i = 0; i < botPos.count; i++) {
+      let x = botPos.getX(i), y = botPos.getY(i);
+      const r = Math.sqrt(x * x + y * y);
+      const angle = Math.atan2(y, x);
+      if (r > outerR) { x = outerR * Math.cos(angle); y = outerR * Math.sin(angle); botPos.setX(i, x); botPos.setY(i, y); }
+      else if (r < innerR) { x = innerR * Math.cos(angle); y = innerR * Math.sin(angle); botPos.setX(i, x); botPos.setY(i, y); }
+      botPos.setZ(i, saddleZ(x, y, Math.sqrt(x*x+y*y)) - brimThick / 2);
+    }
+    botGeo.computeVertexNormals();
+    const botMesh = new THREE.Mesh(botGeo, hatMat);
+    botMesh.position.z = brimBase;
+    botMesh.castShadow = true;
+    hatGroup.add(botMesh);
+
+    // Outer edge ring — torus following the saddle curve at the outer edge
+    const edgeSegs = 48;
+    const edgeGeo = new THREE.BufferGeometry();
+    const edgeVerts = [];
+    for (let i = 0; i <= edgeSegs; i++) {
+      const a = (i / edgeSegs) * Math.PI * 2;
+      const x = outerR * Math.cos(a), y = outerR * Math.sin(a);
+      const z = saddleZ(x, y, outerR);
+      edgeVerts.push(x, y, z + brimThick / 2);
+      edgeVerts.push(x, y, z - brimThick / 2);
+    }
+    const edgeIndices = [];
+    for (let i = 0; i < edgeSegs; i++) {
+      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+      edgeIndices.push(a, b, c, b, d, c);
+    }
+    edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgeVerts, 3));
+    edgeGeo.setIndex(edgeIndices);
+    edgeGeo.computeVertexNormals();
+    const edgeMesh = new THREE.Mesh(edgeGeo, hatMat);
+    edgeMesh.position.z = brimBase;
+    hatGroup.add(edgeMesh);
+
+    // Crown walls — tapered from wide base (fits over head) to narrower top
+    const wallH = headR * crownH;
+    const crownTopR = headR * 0.7;
+    const crownGeo = new THREE.CylinderGeometry(crownTopR, innerR, wallH, 16);
+    crownGeo.rotateX(Math.PI / 2);
+    const crown = new THREE.Mesh(crownGeo, hatMat);
+    crown.position.z = brimBase + wallH / 2;
+    crown.castShadow = true;
+    hatGroup.add(crown);
+
+    // Flat cap on top of crown
+    const topGeo = new THREE.CylinderGeometry(crownTopR, crownTopR, headR * 0.06, 16);
+    topGeo.rotateX(Math.PI / 2);
+    const top = new THREE.Mesh(topGeo, hatMat);
+    top.position.z = brimBase + wallH;
+    hatGroup.add(top);
+
+    // Hat band — around base of crown
+    const bandGeo = new THREE.TorusGeometry(innerR * 0.98, headR * 0.05, 8, 24);
+    const bandMat = new THREE.MeshPhongMaterial({ color: bandColor, shininess: 30 });
+    const band = new THREE.Mesh(bandGeo, bandMat);
+    band.position.z = brimBase + wallH * 0.08;
+    hatGroup.add(band);
+  }
+
+  // Helper: bandana around neck
+  function addBandana(color) {
+    const bandanaMat = new THREE.MeshPhongMaterial({ color: color, shininess: 15 });
+    const bGeo = new THREE.TorusGeometry(20, 5, 8, 20);
+    const bandana = new THREE.Mesh(bGeo, bandanaMat);
+    bandana.position.z = torsoH + 2;
+    bodyPivot.add(bandana);
+    // Knot/tail hanging down front
+    const knotGeo = new THREE.ConeGeometry(6, 18, 6);
+    knotGeo.rotateX(Math.PI / 2);
+    knotGeo.rotateZ(Math.PI / 2);
+    const knot = new THREE.Mesh(knotGeo, bandanaMat);
+    knot.position.set(22, 0, torsoH - 5);
+    bodyPivot.add(knot);
+  }
+
+  // Helper: bolo tie
+  function addBoloTie() {
+    const cordMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 20 });
+    // Two cords hanging down
+    for (const side of [-1, 1]) {
+      const cordGeo = new THREE.CylinderGeometry(1.5, 1.5, 60, 6);
+      cordGeo.rotateX(Math.PI / 2);
+      const cord = new THREE.Mesh(cordGeo, cordMat);
+      cord.position.set(12, side * 8, torsoH - 25);
+      bodyPivot.add(cord);
+    }
+    // Medallion
+    const medalGeo = new THREE.CylinderGeometry(8, 8, 3, 12);
+    medalGeo.rotateX(Math.PI / 2);
+    const medalMat = new THREE.MeshPhongMaterial({ color: 0xc0c0c0, shininess: 80, specular: new THREE.Color(0xffffff) });
+    const medal = new THREE.Mesh(medalGeo, medalMat);
+    medal.position.set(12, 0, torsoH + 2);
+    bodyPivot.add(medal);
+  }
+
+  // === Apply styles per character — all western ===
+  //              hatColor    bandColor  brimW  crownH
+  //              hatColor    bandColor  brimW  crownH  tiltBack
+  // tilt: + = pushed back (relaxed), 0 = straight on. No forward tilt (covers eyes)
+  if (hairStyle === 'cowboy') {
+    // #1: Classic brown — straight on, looks proper
+    addShortHair();
+    addCowboyHat(0x5c3a1e, 0x222222, 2.0, 0.75, 0.0);
+    addBoloTie();
+  } else if (hairStyle === 'rancher') {
+    // #2: Black — slightly back
+    addSlickedHair();
+    addCowboyHat(0x1a1a1a, 0x882222, 1.85, 0.6, 0.1);
+    addBandana(0xcc2222);
+  } else if (hairStyle === 'trucker') {
+    // #3: Tan/khaki — pushed back, friendly/casual
+    addBuzzCut();
+    addCowboyHat(0xc4a46a, 0x553311, 2.3, 0.5, 0.3);
+  } else if (hairStyle === 'slick') {
+    // #4: Dark brown — straight on, serious
+    addSlickedHair();
+    addCowboyHat(0x3a2510, 0xc0c0c0, 1.8, 0.8, 0.0);
+    addBoloTie();
+  } else if (hairStyle === 'buzzcut') {
+    // #5: Gray — pushed back a bit, easygoing
+    addBuzzCut();
+    addCowboyHat(0x6a6a6a, 0x222222, 1.9, 0.65, 0.2);
+    addBandana(0x996633);
+  } else if (hairStyle === 'straw') {
+    // #6: Straw — pushed way back, laid-back rancher
+    addShortHair();
+    addCowboyHat(0xd4b86a, 0x552200, 2.4, 0.45, 0.35);
+  }
+
+  // === SHOULDER BRIDGE — connects torso to shoulder joints ===
+  const bridgeGeo = new THREE.CylinderGeometry(16, 18, shoulderW * 2, 10);
+  // CylinderGeometry default axis is Y, which is left-right in this Z-up scene — no rotation needed
+  const bridge = new THREE.Mesh(bridgeGeo, shirtMat);
+  bridge.position.z = torsoH - 10;
+  bridge.castShadow = true;
+  bodyPivot.add(bridge);
+
+  // === ARMS (articulated with pivot groups) ===
+  for (const side of [-1, 1]) {
+    const label = side === 1 ? 'L' : 'R';
+
+    // Shoulder pivot at shoulder position
+    const shoulderPivot = new THREE.Group();
+    shoulderPivot.position.set(0, side * shoulderW, torsoH - 10);
+    bodyPivot.add(shoulderPivot);
+    joints['shoulder' + label] = shoulderPivot;
+
+    // Shoulder ball
+    const sBall = new THREE.Mesh(new THREE.SphereGeometry(18, 10, 10), shirtMat);
+    sBall.castShadow = true;
+    shoulderPivot.add(sBall);
+
+    // Upper arm — hangs down from shoulder pivot (toward -Z)
+    const uArmGeo = new THREE.CylinderGeometry(13, 15, upperArmLen, 8);
+    uArmGeo.rotateX(Math.PI / 2);
+    // Shift geometry so top is at origin, bottom at -Z
+    uArmGeo.translate(0, 0, -upperArmLen / 2);
+    const uArm = new THREE.Mesh(uArmGeo, shirtMat);
+    uArm.castShadow = true;
+    shoulderPivot.add(uArm);
+
+    // Elbow pivot at bottom of upper arm
+    const elbowPivot = new THREE.Group();
+    elbowPivot.position.z = -upperArmLen;
+    shoulderPivot.add(elbowPivot);
+    joints['elbow' + label] = elbowPivot;
+
+    const eBall = new THREE.Mesh(new THREE.SphereGeometry(14, 8, 8), skinMat);
+    eBall.castShadow = true;
+    elbowPivot.add(eBall);
+
+    // Forearm — hangs down from elbow
+    const fArmGeo = new THREE.CylinderGeometry(11, 13, forearmLen, 8);
+    fArmGeo.rotateX(Math.PI / 2);
+    fArmGeo.translate(0, 0, -forearmLen / 2);
+    const fArm = new THREE.Mesh(fArmGeo, skinMat);
+    fArm.castShadow = true;
+    elbowPivot.add(fArm);
+
+    // Hand
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(14, 8, 8), skinMat);
+    hand.position.z = -forearmLen;
+    hand.castShadow = true;
+    elbowPivot.add(hand);
+  }
+
+  // === LEGS (articulated with pivot groups) ===
+  for (const side of [-1, 1]) {
+    const label = side === 1 ? 'L' : 'R';
+
+    // Hip pivot
+    const hipPivot = new THREE.Group();
+    hipPivot.position.set(0, side * 35, 0);
+    bodyPivot.add(hipPivot);
+    joints['hip' + label] = hipPivot;
+
+    // Thigh — goes down from hip
+    const thighGeo = new THREE.CylinderGeometry(25, 22, thighLen, 10);
+    thighGeo.rotateX(Math.PI / 2);
+    thighGeo.translate(0, 0, -thighLen / 2);
+    const thigh = new THREE.Mesh(thighGeo, pantsMat);
+    thigh.castShadow = true;
+    hipPivot.add(thigh);
+
+    // Knee pivot
+    const kneePivot = new THREE.Group();
+    kneePivot.position.z = -thighLen;
+    hipPivot.add(kneePivot);
+    joints['knee' + label] = kneePivot;
+
+    const kBall = new THREE.Mesh(new THREE.SphereGeometry(18, 8, 8), pantsMat);
+    kBall.castShadow = true;
+    kneePivot.add(kBall);
+
+    // Shin
+    const shinGeo = new THREE.CylinderGeometry(18, 16, shinLen, 8);
+    shinGeo.rotateX(Math.PI / 2);
+    shinGeo.translate(0, 0, -shinLen / 2);
+    const shin = new THREE.Mesh(shinGeo, pantsMat);
+    shin.castShadow = true;
+    kneePivot.add(shin);
+
+    // Foot/shoe
+    const shoe = new THREE.Mesh(
+      new THREE.BoxGeometry(shoeLen, 35, footH),
+      shoeMat
+    );
+    shoe.position.set(shoeLen * 0.2, 0, -shinLen - footH / 2);
+    shoe.castShadow = true;
+    kneePivot.add(shoe);
+  }
+
+  root.joints = joints;
+  root.walkPhase = 0;
+  return root;
+}
+
+// === WALK CYCLE ANIMATION ===
+function animateWalk(mannequin, dt, speed) {
+  const j = mannequin.joints;
+  mannequin.walkPhase += dt * speed * 3.5;
+  const t = mannequin.walkPhase;
+
+  const stride = 0.55; // leg swing amplitude (radians)
+  const armSwing = 0.45;
+  const bobAmt = 8;
+  const leanAmt = 0.04;
+
+  // Body bob and lean
+  j.body.position.z = mannequin._baseHipZ + Math.abs(Math.sin(t)) * bobAmt;
+  // Slight forward lean
+  j.body.rotation.y = Math.sin(t) * leanAmt;
+
+  // Head counter-rotation to stay mostly level
+  j.head.rotation.y = -Math.sin(t) * leanAmt * 0.5;
+
+  // === LEGS ===
+  // Right leg: sin(t), Left leg: sin(t + PI)
+  // Hip rotates around Y axis (forward/back swing in XZ plane)
+  j.hipR.rotation.y = Math.sin(t) * stride;
+  j.hipL.rotation.y = Math.sin(t + Math.PI) * stride;
+
+  // Knee only bends backward (positive Y rotation when leg is going back)
+  // Bends most when leg is behind, straightens when in front
+  const kneeR = Math.max(0, -Math.sin(t - 0.4)) * stride * 1.2;
+  const kneeL = Math.max(0, -Math.sin(t + Math.PI - 0.4)) * stride * 1.2;
+  j.kneeR.rotation.y = kneeR;
+  j.kneeL.rotation.y = kneeL;
+
+  // === ARMS — swing opposite to legs ===
+  j.shoulderR.rotation.y = Math.sin(t + Math.PI) * armSwing;
+  j.shoulderL.rotation.y = Math.sin(t) * armSwing;
+
+  // Elbows bend when arm swings back
+  const elbowR = Math.max(0, Math.sin(t + Math.PI - 0.3)) * 0.6;
+  const elbowL = Math.max(0, Math.sin(t - 0.3)) * 0.6;
+  j.elbowR.rotation.y = -elbowR;
+  j.elbowL.rotation.y = -elbowL;
+
+  // Note: position movement handled by state machine, not here
+}
+
+// === CHAIR ===
+const chairWoodMat = new THREE.MeshPhongMaterial({ color: 0x5c3a1e, shininess: 35 });
+const cushionMat = new THREE.MeshPhongMaterial({ color: 0x6B1A00, shininess: 20 });
+
+function createChair() {
+  const group = new THREE.Group();
+  // Proportional to mannequin (~629 tall, knee at ~175)
+  const sw = 200, sd = 200, st = 20, sh = 175, bh = 220, bt = 15;
+
+  // Seat
+  const seatGeo = new THREE.BoxGeometry(sd, sw, st);
+  seatGeo.translate(0, 0, st / 2);
+  const seat = new THREE.Mesh(seatGeo, cushionMat);
+  seat.position.z = sh - st;
+  seat.castShadow = true;
+  group.add(seat);
+
+  // Backrest
+  const backGeo = new THREE.BoxGeometry(bt, sw - 20, bh);
+  backGeo.translate(0, 0, bh / 2);
+  const back = new THREE.Mesh(backGeo, cushionMat);
+  back.position.set(sd / 2 - bt / 2, 0, sh);
+  back.castShadow = true;
+  group.add(back);
+
+  // Legs
+  const legInset = 20;
+  const legPositions = [
+    [-sd / 2 + legInset, -sw / 2 + legInset],
+    [sd / 2 - legInset, -sw / 2 + legInset],
+    [-sd / 2 + legInset, sw / 2 - legInset],
+    [sd / 2 - legInset, sw / 2 - legInset]
+  ];
+  for (const [x, y] of legPositions) {
+    const legGeo = new THREE.CylinderGeometry(8, 12, sh - st, 8);
+    legGeo.rotateX(Math.PI / 2);
+    const leg = new THREE.Mesh(legGeo, chairWoodMat);
+    leg.position.set(x, y, (sh - st) / 2);
+    leg.castShadow = true;
+    group.add(leg);
+  }
+
+  return group;
+}
+
+// === SCENE SETUP: CHAIR + MANNEQUIN ===
+// Chair sits at origin area, facing -X (backrest on +X side)
+const chair = createChair();
+chair.position.set(0, 0, 0); // feet on ground
+scene.add(chair);
+
+// Chair dimensions for reference
+const CHAIR_SEAT_Z = 175; // seat surface height from chair base
+const CHAIR_DEPTH = 200;
+
+// Mannequin body dimensions
+const HIP_Z = 15 + 160 + 155; // footH + shinLen + thighLen = 330
+
+// === POSE DEFINITIONS ===
+const STANDING_POSE = {
+  body: { x: 0, y: 0, z: 0 },
+  head: { x: 0, y: 0, z: 0 },
+  hipL: { y: 0 }, hipR: { y: 0 },
+  kneeL: { y: 0 }, kneeR: { y: 0 },
+  shoulderL: { y: 0 }, shoulderR: { y: 0 },
+  elbowL: { y: 0 }, elbowR: { y: 0 }
+};
+
+const SEATED_POSE = {
+  body: { y: 0.06 },  // slight forward lean
+  head: { y: -0.06 }, // counter-rotate
+  hipL: { y: -1.57 },  // thighs forward (90°)
+  hipR: { y: -1.57 },
+  kneeL: { y: 1.57 },  // shins straight down (90°)
+  kneeR: { y: 1.57 },
+  shoulderL: { y: -0.4 },  // arms relaxed forward
+  shoulderR: { y: -0.4 },
+  elbowL: { y: -0.5 },     // forearms resting
+  elbowR: { y: -0.5 }
+};
+
+// === JOINT INTERPOLATION ===
+function setJointPose(joints, pose) {
+  for (const [name, rots] of Object.entries(pose)) {
+    const j = joints[name];
+    if (!j) continue;
+    for (const [axis, val] of Object.entries(rots)) {
+      j.rotation[axis] = val;
+    }
+  }
+}
+
+function lerpJointPose(joints, fromPose, toPose, t) {
+  t = Math.max(0, Math.min(1, t));
+  const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOut
+  for (const [name, toRots] of Object.entries(toPose)) {
+    const j = joints[name];
+    if (!j) continue;
+    const fromRots = fromPose[name] || {};
+    for (const [axis, toVal] of Object.entries(toRots)) {
+      const fromVal = fromRots[axis] || 0;
+      j.rotation[axis] = fromVal + (toVal - fromVal) * ease;
+    }
+  }
+}
+
+// === ANIMATION STATE MACHINE ===
+// Flow: walk from behind chair alongside it → stop beside → pull chair out →
+//       sidestep in front of seat → feet lock, body lowers to sit →
+//       chair pushes forward, feet extend forward
+const STATE = {
+  WALKING: 0,      // Walk from behind chair, along the side, facing -X
+  STOPPING: 1,     // Blend walk to stand
+  PULLING_CHAIR: 2,// Reach to side and pull chair back (+X)
+  SIDESTEPPING: 3, // Sidestep to center in front of seat opening
+  SITTING: 4,      // Feet locked, body lowers onto seat
+  PUSHING_IN: 5,   // Chair scoots forward, feet extend
+  SEATED: 6
+};
+
+let currentChar = 0;
+let mannequin = null;
+let animState = STATE.WALKING;
+let stateTimer = 0;
+let walkSpeed = 1.0;
+
+// Layout: chair at origin, faces -X (backrest on +X side, open seat on -X side)
+// "Table" would be at far -X. Pulling chair out = move it in +X.
+// Character walks from BEHIND the chair (+X side), heading -X, alongside the chair.
+// They're offset in +Y (to one side of the chair).
+const CHAIR_WIDTH = 200;
+const CHAIR_SD = 200; // seat depth (X dimension)
+const WALK_START_X = 500;           // start behind the chair (+X side)
+const BESIDE_X = 0;                  // stop beside the chair center
+const BESIDE_Y = CHAIR_WIDTH / 2 + 50; // offset to one side of chair (+Y)
+const SEAT_Y = 0;                    // final Y: centered on chair
+const CHAIR_PULL_DIST = 150;         // how far chair pulls back (+X)
+const chairOrigPos = new THREE.Vector3(0, 0, 0);
+
+// When character sidesteps in front of chair to sit, feet plant here
+// In front of the open seat (-X side of chair)
+const FEET_PLANT_X = -(CHAIR_SD / 2 + 10); // just past front edge of seat
+
+// Sitting geometry: body shifts backward over seat while feet stay planted
+// In local character space: character faces +X locally, rotation.z=PI flips to world -X
+// local +X = world -X, local -X = world +X
+// To move body backward (world +X) from feet, use body.position.x < 0 in local space
+// Distance from feet to seat center: feet at FEET_PLANT_X, seat center at chair.x
+// So backward offset = |FEET_PLANT_X - chair.x| ... computed dynamically
+
+function spawnCharacter(index) {
+  if (mannequin) scene.remove(mannequin);
+  mannequin = createWalkingMannequin(index);
+  // Start behind the chair, offset to one side, facing -X
+  mannequin.position.set(WALK_START_X, BESIDE_Y, 0);
+  mannequin.rotation.z = Math.PI; // face -X (same direction as chair)
+  mannequin._baseHipZ = HIP_Z;
+  mannequin.joints.body.position.z = HIP_Z;
+  mannequin.joints.body.position.x = 0; // reset body offset
+  mannequin.walkPhase = 0;
+  scene.add(mannequin);
+
+  // Reset chair
+  chair.position.copy(chairOrigPos);
+
+  // Reset state
+  animState = STATE.WALKING;
+  stateTimer = 0;
+  updateInfo();
+}
+
+function updateInfo() {
+  const names = ['Cowboy', 'Rancher', 'Trucker', 'Slick', 'Buzz', 'Straw Hat'];
+  const stateNames = ['Walking', 'Stopping', 'Pull Chair', 'Sidestep', 'Sitting', 'Push In', 'Seated'];
+  document.getElementById('info').textContent =
+    `${names[currentChar]} (#${currentChar + 1})  |  ${stateNames[animState]}  |  R: restart`;
+}
+
+spawnCharacter(0);
+
+// === ORBIT CONTROLS ===
+let orbitAngle = 2.2;
+let orbitPitch = 0.4;
+let orbitDist = 1000;
+let isDragging = false;
+let lastMouse = { x: 0, y: 0 };
+
+renderer.domElement.addEventListener('mousedown', e => {
+  isDragging = true; lastMouse.x = e.clientX; lastMouse.y = e.clientY;
+});
+renderer.domElement.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  orbitAngle -= (e.clientX - lastMouse.x) * 0.005;
+  orbitPitch = Math.max(0.05, Math.min(1.4, orbitPitch + (e.clientY - lastMouse.y) * 0.005));
+  lastMouse.x = e.clientX; lastMouse.y = e.clientY;
+});
+renderer.domElement.addEventListener('mouseup', () => isDragging = false);
+renderer.domElement.addEventListener('mouseleave', () => isDragging = false);
+renderer.domElement.addEventListener('wheel', e => {
+  orbitDist = Math.max(200, Math.min(2500, orbitDist + e.deltaY * 0.5));
+});
+
+// === KEYBOARD ===
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if (k >= '1' && k <= '6') { currentChar = parseInt(k) - 1; spawnCharacter(currentChar); }
+  else if (k === 'r' || k === 'R') { spawnCharacter(currentChar); }
+});
+
+// === RESIZE ===
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// === ANIMATION LOOP ===
+let lastTime = performance.now();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  if (mannequin) {
+    const j = mannequin.joints;
+    const easeIO = t => t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+
+    switch (animState) {
+
+      case STATE.WALKING: {
+        // Walk from behind chair (+X), heading -X, alongside the chair (offset in Y)
+        animateWalk(mannequin, dt, walkSpeed);
+        const speed = 200 * walkSpeed;
+        mannequin.position.x -= dt * speed;
+        if (mannequin.position.x <= BESIDE_X) {
+          mannequin.position.x = BESIDE_X;
+          animState = STATE.STOPPING;
+          stateTimer = 0;
+        }
+        break;
+      }
+
+      case STATE.STOPPING: {
+        // Blend walk to standing
+        stateTimer += dt;
+        const t = Math.min(stateTimer / 0.4, 1);
+        lerpJointPose(j, {}, STANDING_POSE, t);
+        j.body.position.z = HIP_Z;
+        j.body.position.x = 0;
+        if (t >= 1) {
+          setJointPose(j, STANDING_POSE);
+          animState = STATE.PULLING_CHAIR;
+          stateTimer = 0;
+        }
+        break;
+      }
+
+      case STATE.PULLING_CHAIR: {
+        // Character is at (0, BESIDE_Y, 0) facing -X. Chair is at (0,0,0).
+        // Chair is to their LEFT (world -Y = local +Y).
+        // Left arm reaches to the side and back to grab chair, pulls it +X.
+        stateTimer += dt;
+        const dur = 1.0;
+        const t = Math.min(stateTimer / dur, 1);
+        const ease = easeIO(t);
+
+        // Left arm reaches back and to the side
+        j.shoulderL.rotation.y = 0.5 * ease;  // arm swings back
+        j.elbowL.rotation.y = -0.4 * ease;
+        // Slight body turn toward chair
+        j.body.rotation.x = -0.15 * ease;
+
+        // Pull chair out (+X direction = backward from table)
+        chair.position.x = chairOrigPos.x + CHAIR_PULL_DIST * ease;
+
+        if (t >= 1) {
+          animState = STATE.SIDESTEPPING;
+          stateTimer = 0;
+        }
+        break;
+      }
+
+      case STATE.SIDESTEPPING: {
+        // Sidestep from beside chair (Y=BESIDE_Y) to centered (Y=SEAT_Y=0),
+        // and move X forward to plant feet in front of the seat opening.
+        stateTimer += dt;
+        const dur = 0.8;
+        const t = Math.min(stateTimer / dur, 1);
+        const ease = easeIO(t);
+
+        // Move Y: from side to center
+        mannequin.position.y = BESIDE_Y + (SEAT_Y - BESIDE_Y) * ease;
+        // Move X: from beside center (0) to feet-plant position in front of seat
+        mannequin.position.x = BESIDE_X + (FEET_PLANT_X - BESIDE_X) * ease;
+
+        // Release arm and body turn
+        j.shoulderL.rotation.y = 0.5 * (1 - ease);
+        j.elbowL.rotation.y = -0.4 * (1 - ease);
+        j.body.rotation.x = -0.15 * (1 - ease);
+
+        if (t >= 1) {
+          mannequin.position.y = SEAT_Y;
+          mannequin.position.x = FEET_PLANT_X;
+          setJointPose(j, STANDING_POSE);
+          j.body.position.x = 0;
+          animState = STATE.SITTING;
+          stateTimer = 0;
+        }
+        break;
+      }
+
+      case STATE.SITTING: {
+        // FEET STAY LOCKED at current mannequin.position (FEET_PLANT_X, 0, 0).
+        // Body (hip) lowers and shifts backward (world +X = local -X) to land on chair seat.
+        // We achieve this by:
+        //   - body.position.z: lowers from HIP_Z to seat height
+        //   - body.position.x: shifts in local -X (= world +X = backward toward seat)
+        //   - hip/knee rotations create the bent-leg seated look
+        stateTimer += dt;
+        const dur = 1.2;
+        const t = Math.min(stateTimer / dur, 1);
+        const ease = easeIO(t);
+
+        const seatedHipZ = CHAIR_SEAT_Z + 20; // 195
+        // How far back does the body need to shift?
+        // Feet are at world FEET_PLANT_X. Chair seat center is at chair.position.x.
+        // In local space, backward = -X. The offset is:
+        const bodyBackOffset = -(chair.position.x - FEET_PLANT_X); // negative = local backward
+        j.body.position.x = bodyBackOffset * ease;
+
+        // Lower hip
+        j.body.position.z = HIP_Z + (seatedHipZ - HIP_Z) * ease;
+
+        // Blend to seated pose (hips forward, knees bent)
+        lerpJointPose(j, STANDING_POSE, SEATED_POSE, t);
+
+        if (t >= 1) {
+          setJointPose(j, SEATED_POSE);
+          j.body.position.z = seatedHipZ;
+          j.body.position.x = bodyBackOffset;
+          animState = STATE.PUSHING_IN;
+          stateTimer = 0;
+          // Save body offset at start of push-in
+          mannequin._sitBodyOffsetX = bodyBackOffset;
+        }
+        break;
+      }
+
+      case STATE.PUSHING_IN: {
+        // Chair scoots forward (-X) back to original position.
+        // Character's butt rides the chair (mannequin root moves with chair).
+        // Feet extend forward (-X) as chair pushes in.
+        // Body offset gradually returns to 0 (body centers over new foot position).
+        stateTimer += dt;
+        const dur = 1.0;
+        const t = Math.min(stateTimer / dur, 1);
+        const ease = easeIO(t);
+
+        const startChairX = chairOrigPos.x + CHAIR_PULL_DIST;
+        const endChairX = chairOrigPos.x;
+        const newChairX = startChairX + (endChairX - startChairX) * ease;
+        chair.position.x = newChairX;
+
+        // Mannequin root (feet) slides forward as chair pushes in
+        // Start: feet at FEET_PLANT_X, end: feet at a position under/near the chair
+        const endFeetX = endChairX; // feet end up at chair center X
+        mannequin.position.x = FEET_PLANT_X + (endFeetX - FEET_PLANT_X) * ease;
+
+        // Body offset shrinks as feet catch up to body position
+        const startOffset = mannequin._sitBodyOffsetX || 0;
+        j.body.position.x = startOffset * (1 - ease);
+
+        // Legs extend forward: reduce hip/knee bend slightly for extended posture
+        const extendT = ease;
+        // From SEATED_POSE toward a more extended pose
+        j.hipL.rotation.y = SEATED_POSE.hipL.y + 0.3 * extendT; // less bent = more forward
+        j.hipR.rotation.y = SEATED_POSE.hipR.y + 0.3 * extendT;
+        j.kneeL.rotation.y = SEATED_POSE.kneeL.y - 0.4 * extendT; // less knee bend
+        j.kneeR.rotation.y = SEATED_POSE.kneeR.y - 0.4 * extendT;
+
+        if (t >= 1) {
+          chair.position.x = endChairX;
+          mannequin.position.x = endFeetX;
+          j.body.position.x = 0;
+          animState = STATE.SEATED;
+          stateTimer = 0;
+        }
+        break;
+      }
+
+      case STATE.SEATED: {
+        // Done — sitting at the table
+        break;
+      }
+    }
+
+    updateInfo();
+
+    // Camera orbits around the scene center
+    const target = new THREE.Vector3(0, 0, 280);
+    camera.position.set(
+      target.x + orbitDist * Math.cos(orbitAngle) * Math.cos(orbitPitch),
+      target.y + orbitDist * Math.sin(orbitAngle) * Math.cos(orbitPitch),
+      target.z + orbitDist * Math.sin(orbitPitch)
+    );
+    camera.lookAt(target);
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+</script>
+</body>
+</html>

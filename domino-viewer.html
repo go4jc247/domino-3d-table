@@ -37,11 +37,12 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1a2e);
 
 const camera = new THREE.PerspectiveCamera(40, window.innerWidth/window.innerHeight, 0.1, 500);
-camera.position.set(0, -60, 45);
+camera.position.set(0, -40, 50);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;
 document.body.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -62,7 +63,6 @@ const fill = new THREE.PointLight(0xffffff, 0.3);
 fill.position.set(-40, 20, 30);
 scene.add(fill);
 
-// Subtle ground plane for shadow
 const groundGeo = new THREE.PlaneGeometry(200, 200);
 const groundMat = new THREE.MeshPhongMaterial({ color: 0x222238 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -71,24 +71,29 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 // ========== MATERIALS ==========
-const ivoryMat = new THREE.MeshPhongMaterial({ color: 0xFFFFF0 });
-const blackMat = new THREE.MeshPhongMaterial({ color: 0x111111 });
-
 const pipColors = [
   0x141416, 0x36B258, 0xF0C73D, 0xE74C3C,
   0x00B2FF, 0x9B59B6, 0xA76E34, 0x3B82F6
 ];
 
-// ========== DOMINO GEOMETRY ==========
-const DOM_L = 48, DOM_W = 24, DOM_H = 10, DOM_BEVEL = 2;
-const PIP_R = 2.5, PIP_DEPTH = 1.8, HOLE_DEPTH = 4;
-const GROOVE_W = 2.5, GROOVE_LEN = 17.5, GROOVE_DEPTH = 0.7;
-const CONCAVE_DEPTH = 1.8;
+// ========== DOMINO GEOMETRY (matching OpenSCAD model) ==========
+const DOM_L = 50, DOM_W = 25, DOM_H = 9, DOM_BEVEL = 2;
+const PIP_R = 2.5, HOLE_DEPTH = 4;
+const GROOVE_W = 2.5, GROOVE_LEN = 17.5;
+const BOWL_DEPTH = 2.5;
+const BOWL_ROT_X = Math.PI / 2;
+const PILL_RY = Math.PI / 2;
+const TC_RY = Math.PI;
+const BC_RY = Math.PI;
+const BC_RZ = Math.PI;
+const PIP_SHININESS = 295, PIP_SPEC = 70;
+const BODY_SHININESS = 30, BODY_SPEC = 15;
+const GROOVE_SHININESS = 30, GROOVE_SPEC = 15;
 
 const pipGrid = {
-  TL: [-3.75,  3.75], T: [-3.75, 0], TR: [-3.75, -3.75],
-  L:  [0,      3.75], C: [0,     0], R:  [0,     -3.75],
-  BL: [3.75,   3.75], B: [3.75,  0], BR: [3.75,  -3.75]
+  TL: [-6.25,  6.25], T: [-6.25, 0], TR: [-6.25, -6.25],
+  L:  [0,      6.25], C: [0,     0], R:  [0,     -6.25],
+  BL: [6.25,   6.25], B: [6.25,  0], BR: [6.25,  -6.25]
 };
 const pipLayouts = [
   [],
@@ -101,7 +106,7 @@ const pipLayouts = [
   ['TL', 'TR', 'L', 'C', 'R', 'BL', 'BR']
 ];
 
-function createRoundedBox(w, h, d, r, segments) {
+function roundedRectShape(w, h, r) {
   const shape = new THREE.Shape();
   const x = w/2 - r, y = h/2 - r;
   shape.moveTo(-x, -h/2);
@@ -113,74 +118,129 @@ function createRoundedBox(w, h, d, r, segments) {
   shape.quadraticCurveTo(-w/2, h/2, -w/2, y);
   shape.lineTo(-w/2, -y);
   shape.quadraticCurveTo(-w/2, -h/2, -x, -h/2);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: d - 2*r, bevelEnabled: true,
-    bevelThickness: r, bevelSize: r, bevelSegments: segments || 3
-  });
-  geo.translate(0, 0, -(d - 2*r)/2 - r);
-  return geo;
-}
-
-function createConcavePip(radius, depth, segs) {
-  const sphereR = (radius*radius + depth*depth) / (2*depth);
-  const geo = new THREE.SphereGeometry(sphereR, segs || 24, segs || 24,
-    0, Math.PI*2, 0, Math.asin(radius/sphereR));
-  geo.rotateX(Math.PI);
-  return geo;
+  return shape;
 }
 
 function createDomino(leftVal, rightVal) {
   const group = new THREE.Group();
   const topZ = DOM_H / 2;
-
-  // 1. Ivory rounded body
-  const bodyGeo = createRoundedBox(DOM_L, DOM_W, DOM_H, DOM_BEVEL, 4);
-  const body = new THREE.Mesh(bodyGeo, ivoryMat);
-  body.castShadow = true;
-  group.add(body);
-
-  // 2. Pip holes + colored concave pads
-  const holeGeo = new THREE.CylinderGeometry(PIP_R, PIP_R, HOLE_DEPTH, 24);
-  holeGeo.rotateX(Math.PI / 2);
-  const holeMat = new THREE.MeshPhongMaterial({ color: 0x0a0a0a });
-  const concaveGeo = createConcavePip(PIP_R - 0.2, CONCAVE_DEPTH, 20);
-
-  function addPips(val, xOffset) {
-    if (val === 0) return;
-    const pipMat = new THREE.MeshPhongMaterial({ color: pipColors[val] });
-    for (const name of pipLayouts[val]) {
-      const [px, py] = pipGrid[name];
-      const hole = new THREE.Mesh(holeGeo, holeMat);
-      hole.position.set(xOffset + px, py, topZ - HOLE_DEPTH/2 + 0.05);
-      group.add(hole);
-      const pad = new THREE.Mesh(concaveGeo, pipMat);
-      pad.position.set(xOffset + px, py, topZ - HOLE_DEPTH + 0.5);
-      group.add(pad);
-    }
-  }
-
-  addPips(leftVal, -DOM_L/4);
-  addPips(rightVal, DOM_L/4);
-
-  // 3. Pill-shaped center groove running across width (along Y) at x=0
+  const splitZ = topZ - HOLE_DEPTH;
   const gr = GROOVE_W / 2;
   const gl = GROOVE_LEN / 2;
-  // Pill shape in XY plane: runs along Y
-  const groovePath = new THREE.Shape();
-  groovePath.moveTo(-gr, -gl);
-  groovePath.lineTo(-gr, gl);
-  groovePath.arc(gr, 0, gr, Math.PI, 0, true);
-  groovePath.lineTo(gr, -gl);
-  groovePath.arc(-gr, 0, gr, 0, Math.PI, true);
-  const grooveExtGeo = new THREE.ExtrudeGeometry(groovePath, {
-    depth: HOLE_DEPTH, bevelEnabled: false
+  const frameW = DOM_BEVEL;
+
+  const bodySpecColor = new THREE.Color(`rgb(${BODY_SPEC},${BODY_SPEC},${BODY_SPEC})`);
+  const grooveSpecColor = new THREE.Color(`rgb(${GROOVE_SPEC},${GROOVE_SPEC},${GROOVE_SPEC})`);
+  const pipSpecColor = new THREE.Color(`rgb(${PIP_SPEC},${PIP_SPEC},${PIP_SPEC})`);
+  const ivoryMat = new THREE.MeshPhongMaterial({ color: 0xFFFFF0, shininess: BODY_SHININESS, specular: bodySpecColor });
+  const blackMat = new THREE.MeshPhongMaterial({ color: 0x111111, side: THREE.DoubleSide, shininess: GROOVE_SHININESS, specular: grooveSpecColor });
+
+  const allPips = [];
+  if (leftVal > 0)
+    for (const name of pipLayouts[leftVal]) {
+      const [px, py] = pipGrid[name];
+      allPips.push({ x: -DOM_L/4 + px, y: py, val: leftVal });
+    }
+  if (rightVal > 0)
+    for (const name of pipLayouts[rightVal]) {
+      const [px, py] = pipGrid[name];
+      allPips.push({ x: DOM_L/4 + px, y: py, val: rightVal });
+    }
+
+  // LAYER 1: BOTTOM
+  const bottomShape = roundedRectShape(DOM_L, DOM_W, DOM_BEVEL);
+  const bottomGeo = new THREE.ExtrudeGeometry(bottomShape, {
+    depth: DOM_H - HOLE_DEPTH, bevelEnabled: true,
+    bevelThickness: DOM_BEVEL, bevelSize: DOM_BEVEL, bevelSegments: 3
   });
-  const grooveMesh = new THREE.Mesh(grooveExtGeo, blackMat);
-  grooveMesh.position.set(0, 0, topZ + 0.05);
-  grooveMesh.rotation.set(0, 0, 0);
-  // Shift down so it sits inside the body
-  grooveMesh.position.z = topZ - HOLE_DEPTH + 0.05;
-  group.add(grooveMesh);
+  bottomGeo.translate(0, 0, -topZ - DOM_BEVEL);
+  const bottom = new THREE.Mesh(bottomGeo, ivoryMat);
+  bottom.castShadow = true;
+  group.add(bottom);
+
+  // LAYER 2: BEVELED FRAME
+  const innerX = DOM_L/2 - frameW;
+  const innerY = DOM_W/2 - frameW;
+  const framePlanes = [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), -innerX),
+    new THREE.Plane(new THREE.Vector3(1, 0, 0),  -innerX),
+    new THREE.Plane(new THREE.Vector3(0, -1, 0), -innerY),
+    new THREE.Plane(new THREE.Vector3(0, 1, 0),  -innerY),
+  ];
+  const frameShape = roundedRectShape(DOM_L, DOM_W, DOM_BEVEL);
+  const frameGeo = new THREE.ExtrudeGeometry(frameShape, {
+    depth: HOLE_DEPTH, bevelEnabled: true,
+    bevelThickness: DOM_BEVEL, bevelSize: DOM_BEVEL, bevelSegments: 3
+  });
+  frameGeo.translate(0, 0, splitZ - DOM_BEVEL);
+  const frameMat = new THREE.MeshPhongMaterial({
+    color: 0xFFFFF0, shininess: BODY_SHININESS, specular: bodySpecColor,
+    clippingPlanes: framePlanes, clipIntersection: true, clipShadows: true
+  });
+  const frame = new THREE.Mesh(frameGeo, frameMat);
+  frame.castShadow = true;
+  group.add(frame);
+
+  // LAYER 3: INNER SLAB
+  const innerShape = roundedRectShape(DOM_L - 2*frameW + 0.1, DOM_W - 2*frameW + 0.1, 0.5);
+  for (const pip of allPips) {
+    const hole = new THREE.Path();
+    hole.absarc(pip.x, pip.y, PIP_R, 0, Math.PI * 2, true);
+    innerShape.holes.push(hole);
+  }
+  const grooveHole = new THREE.Path();
+  grooveHole.moveTo(-gr, -gl);
+  grooveHole.lineTo(-gr, gl);
+  grooveHole.absarc(0, gl, gr, Math.PI, 0, true);
+  grooveHole.lineTo(gr, -gl);
+  grooveHole.absarc(0, -gl, gr, 0, Math.PI, true);
+  innerShape.holes.push(grooveHole);
+  const innerGeo = new THREE.ExtrudeGeometry(innerShape, { depth: HOLE_DEPTH, bevelEnabled: false });
+  innerGeo.translate(0, 0, splitZ);
+  const inner = new THREE.Mesh(innerGeo, ivoryMat);
+  group.add(inner);
+
+  // COLORED CONCAVE PIP INSERTS
+  for (const pip of allPips) {
+    const pipMat = new THREE.MeshPhongMaterial({
+      color: pipColors[pip.val], side: THREE.DoubleSide,
+      shininess: PIP_SHININESS, specular: pipSpecColor
+    });
+    const sphereR = (PIP_R * PIP_R + BOWL_DEPTH * BOWL_DEPTH) / (2 * BOWL_DEPTH);
+    const bowlAngle = Math.asin(Math.min(PIP_R / sphereR, 1));
+    const bowlGeo = new THREE.SphereGeometry(sphereR, 24, 16, 0, Math.PI * 2, Math.PI - bowlAngle, bowlAngle);
+    bowlGeo.scale(1, 1, -1);
+    const norms = bowlGeo.attributes.normal;
+    for (let i = 0; i < norms.count; i++) {
+      norms.setXYZ(i, -norms.getX(i), -norms.getY(i), -norms.getZ(i));
+    }
+    norms.needsUpdate = true;
+    bowlGeo.rotateX(BOWL_ROT_X);
+    const bowl = new THREE.Mesh(bowlGeo, pipMat);
+    bowl.position.set(pip.x, pip.y, topZ - BOWL_DEPTH + sphereR);
+    group.add(bowl);
+  }
+
+  // BLACK INVERTED HALF-PILL GROOVE
+  const pillR = gr;
+  const troughGeo = new THREE.CylinderGeometry(pillR, pillR, GROOVE_LEN, 24, 1, true, 0, Math.PI);
+  troughGeo.rotateY(PILL_RY);
+  const trough = new THREE.Mesh(troughGeo, blackMat);
+  trough.position.set(0, 0, topZ);
+  group.add(trough);
+
+  const capGeoTop = new THREE.SphereGeometry(pillR, 24, 12, 0, Math.PI, 0, Math.PI / 2);
+  capGeoTop.rotateY(TC_RY);
+  const capTop = new THREE.Mesh(capGeoTop, blackMat);
+  capTop.position.set(0, gl, topZ);
+  group.add(capTop);
+
+  const capGeoBot = new THREE.SphereGeometry(pillR, 24, 12, 0, Math.PI, 0, Math.PI / 2);
+  capGeoBot.rotateY(BC_RY);
+  capGeoBot.rotateZ(BC_RZ);
+  const capBot = new THREE.Mesh(capGeoBot, blackMat);
+  capBot.position.set(0, -gl, topZ);
+  group.add(capBot);
 
   return group;
 }
