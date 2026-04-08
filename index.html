@@ -34,7 +34,7 @@
     3/4: play dist &nbsp; 5/6: play rot<br>
     [/]: center offset &nbsp; Q: preview<br>
     -/=: trick angle &nbsp; ,/.: trick dist<br>
-    `/~: render scale -/+
+    `/~: render scale -/+ &nbsp; U: hide UI
   </div>
   <label>Dom Y: <span id="domYVal">-8</span></label>
   <label>Dom Z: <span id="domZVal">32</span></label>
@@ -877,6 +877,29 @@ const hairColors = [0x3a2010, 0x1a1a1a, 0x8B4513, 0x554433, 0x2a1505, 0x111111];
 const pantsColors = [0x2a2a3a, 0x3a2a1a, 0x1a3a2a, 0x2a2a4a, 0x3a3a2a, 0x2a1a3a];
 const hairStyleNames = ['cowboy', 'rancher', 'trucker', 'slick', 'buzzcut', 'straw'];
 
+const EXPRESSIONS = [
+  { name: "Big Smile", blink: 0.05, mood: 1 },
+  { name: "Content", blink: 0.12, mood: 0.4 },
+  { name: "Neutral", blink: 0.1, mood: 0 },
+  { name: "Bored", blink: 0.3, mood: 0, pupY: -0.02 },
+  { name: "Deadpan", blink: 0.12, mood: 0 },
+  { name: "Thinking", blink: 0.15, mood: 0.1, pupY: 0.06 },
+  { name: "Looking Left", blink: 0.1, mood: 0, pupY: 0.08 },
+  { name: "Looking Right", blink: 0.1, mood: 0, pupY: -0.08 },
+  { name: "Looking Up", blink: 0.08, mood: 0.05, pupZ: 0.06 },
+  { name: "Drowsy", blink: 0.55, mood: 0 },
+  { name: "Sleepy", blink: 0.7, mood: -0.1 },
+  { name: "Half Asleep", blink: 0.8, mood: -0.2, pupY: 0.02 },
+  { name: "Eyes Closed", blink: 1, mood: 0 },
+  { name: "Peaceful Sleep", blink: 1, mood: 0.2 },
+  { name: "Slight Frown", blink: 0.12, mood: -0.3 },
+  { name: "Sad", blink: 0.18, mood: -0.6, pupY: -0.02 },
+  { name: "Very Sad", blink: 0.25, mood: -1 },
+  { name: "Grumpy", blink: 0.22, mood: -0.4 },
+  { name: "Suspicious", blink: 0.3, mood: -0.1, pupY: 0.05 },
+  { name: "Wink", blink: 0.1, mood: 0.4, winkL: true }
+];
+
 function buildMouthCurve(group, mWidth, mood, tubeR) {
   // Remove old mouth mesh
   while (group.children.length) group.remove(group.children[0]);
@@ -972,12 +995,24 @@ function createWalkingMannequin(charIndex) {
     const lidGeo = new THREE.SphereGeometry(lidR, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
     lidGeo.rotateZ(-Math.PI / 2); // dome pole faces +X
     const lidMat = skinMat.clone(); lidMat.side = THREE.FrontSide;
-    const lidPivot = new THREE.Group();
-    lidPivot.position.set(ex, ey, ez);
-    headGroup.add(lidPivot);
-    const lidMesh = new THREE.Mesh(lidGeo, lidMat);
-    lidPivot.add(lidMesh);
-    joints['eyelid' + label] = lidPivot;
+    // Upper eyelid — start fully open
+    const upperPivot = new THREE.Group();
+    upperPivot.position.set(ex, ey, ez);
+    upperPivot.rotation.y = -Math.PI * 0.92; // open position
+    headGroup.add(upperPivot);
+    upperPivot.add(new THREE.Mesh(lidGeo, lidMat));
+    joints['eyelid' + label] = upperPivot;
+
+    // Lower eyelid — start fully open
+    const lowerGeo = new THREE.SphereGeometry(lidR, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    lowerGeo.rotateZ(-Math.PI / 2);
+    const lowerMat = skinMat.clone(); lowerMat.side = THREE.FrontSide;
+    const lowerPivot = new THREE.Group();
+    lowerPivot.position.set(ex, ey, ez);
+    lowerPivot.rotation.y = Math.PI * 0.75; // open position
+    headGroup.add(lowerPivot);
+    lowerPivot.add(new THREE.Mesh(lowerGeo, lowerMat));
+    joints['eyelidLower' + label] = lowerPivot;
   }
 
   // Nose
@@ -1761,6 +1796,9 @@ for (let i = 0; i < 6; i++) {
     currentAction: null,
     // External
     lookTarget: -1,
+    // Expression system
+    exprIdx: 2, // start Neutral
+    exprTimer: 5 + Math.random() * 10,
   });
 }
 
@@ -1981,6 +2019,15 @@ function updateCharacterBehaviors(dt) {
       }
     }
 
+    // === 2b. EXPRESSION CHANGES ===
+    cs.exprTimer -= dt;
+    if (cs.exprTimer <= 0 && !cs._blinkPhase) {
+      // Pick a new expression (avoid sleep expressions 9-13 unless idle long)
+      const pool = EXPRESSIONS.filter((e, idx) => idx !== cs.exprIdx && idx < 9 || idx > 13);
+      cs.exprIdx = EXPRESSIONS.indexOf(pool[Math.floor(Math.random() * pool.length)]);
+      cs.exprTimer = 6 + Math.random() * 12;
+    }
+
     // === 3. LOOK AT TARGET (game event: watch active player) ===
     if (cs.lookTarget >= 0 && cs.lookTarget !== i && !cs.currentAction?.isReaction) {
       const lookY = getAngleBetweenSeats(i, cs.lookTarget);
@@ -2056,17 +2103,51 @@ function updateCharacterBehaviors(dt) {
       j.shoulderR.rotation.x = breathOff * 0.5; // mirror breathing on right
     }
 
+    // Expression — apply mood to mouth and pupils (skip during intro)
+    const expr = introMode ? { name:'Neutral', blink:0, mood:0 } : (EXPRESSIONS[cs.exprIdx] || EXPRESSIONS[2]);
+    if (j.mouth && j._mouthWidth && cs._lastMood !== expr.mood) {
+      buildMouthCurve(j.mouth, j._mouthWidth, expr.mood, j._mouthTubeR);
+      cs._lastMood = expr.mood;
+    }
+    const headR = 42; // match createWalkingMannequin
+    const F_eyeY = 0.28, F_eyeZ = 0.15, F_pupX = 0.97;
+    const pupYOff = (expr.pupY || 0) * headR;
+    const pupZOff = (expr.pupZ || 0) * headR;
+    if (j.pupilL) j.pupilL.position.set(headR * F_pupX, headR * F_eyeY + pupYOff, headR * F_eyeZ + pupZOff);
+    if (j.pupilR) j.pupilR.position.set(headR * F_pupX, -headR * F_eyeY + pupYOff, headR * F_eyeZ + pupZOff);
+
     // Blinking — half-sphere eyelids rotate around eyeball
-    // blink.current: 0=open, 1=closed
     if (j.eyelidL && j.eyelidR) {
       const upperOpen = -Math.PI * 0.92;
       const upperClosed = 0.0;
-      const t = ch.blink.current;
-      // Map blink 0→0.25 (open), 1→0.54 (closed)
-      const mapped = 0.25 + t * 0.29;
-      const rotY = upperOpen + (upperClosed - upperOpen) * mapped;
-      j.eyelidL.rotation.y = rotY;
-      j.eyelidR.rotation.y = rotY;
+
+      if (introMode) {
+        // Intro blink system handles eyelids during walk-in
+      } else {
+        const t = Math.max(ch.blink.current, expr.blink);
+        const mapped = 0.25 + t * 0.29;
+        const rotY = upperOpen + (upperClosed - upperOpen) * mapped;
+
+        // Wink support
+        if (expr.winkL) {
+          const winkMapped = 0.25 + 1.0 * 0.29;
+          j.eyelidL.rotation.y = upperOpen + (upperClosed - upperOpen) * winkMapped;
+          j.eyelidR.rotation.y = rotY;
+        } else {
+          j.eyelidL.rotation.y = rotY;
+          j.eyelidR.rotation.y = rotY;
+        }
+
+        // Lower eyelids
+        const lowerOpen = Math.PI * 0.75;
+        const lowerClosed = 0.0;
+        const lt = Math.min(mapped * 1.5, 1) * 0.3;
+        const lowerRotY = lowerOpen + (lowerClosed - lowerOpen) * lt;
+        if (j.eyelidLowerL) j.eyelidLowerL.rotation.y = expr.winkL ? (lowerOpen + (lowerClosed - lowerOpen) * Math.min((0.25 + 0.29) * 1.5, 1) * 0.3) : lowerRotY;
+        if (j.eyelidLowerR) j.eyelidLowerR.rotation.y = lowerRotY;
+      } // end !introMode
+
+      // Intro lower lids handled by intro blink system
     }
   }
 }
@@ -2167,6 +2248,12 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyQ') { togglePreview(); }
   // F = toggle fast-forward during intro
   if (e.code === 'KeyF' && introMode) { toggleFF(); }
+  // U = toggle all UI overlays
+  if (e.code === 'KeyU') {
+    const els = [document.getElementById('info'), document.getElementById('controls')];
+    const hidden = els[0].style.display === 'none';
+    els.forEach(el => { if (el) el.style.display = hidden ? '' : 'none'; });
+  }
   // ` (backquote) with shift = render scale up, without shift = render scale down
   if (e.code === 'Backquote') {
     if (e.shiftKey) {
@@ -2641,6 +2728,46 @@ function animate() {
 
       if (ad.state === WSTATE.SEATED) continue;
       if (ad.state >= WSTATE.WALKING && ad.state <= WSTATE.PUSHING_IN) activeWalker = si;
+
+      // --- Intro blinking & head/eye movement ---
+      if (!ad._introBlink) ad._introBlink = { timer: 1 + Math.random() * 2, phase: null, val: 0 };
+      const ib = ad._introBlink;
+      ib.timer -= wDt;
+      if (ib.timer <= 0 && !ib.phase) { ib.phase = 'closing'; ib.timer = 0.12; }
+      if (ib.phase === 'closing') { ib.val = Math.min(1, ib.val + wDt * 8); if (ib.val >= 0.9) { ib.phase = 'opening'; } }
+      if (ib.phase === 'opening') { ib.val = Math.max(0, ib.val - wDt * 6); if (ib.val <= 0.02) { ib.val = 0; ib.phase = null; ib.timer = 2 + Math.random() * 3; } }
+
+      // Apply blink to eyelids
+      const upperOpen = -Math.PI * 0.92, upperClosed = 0.0;
+      const ibMapped = 0.25 + ib.val * 0.29;
+      const ibRotY = upperOpen + (upperClosed - upperOpen) * ibMapped;
+      if (j.eyelidL) j.eyelidL.rotation.y = ibRotY;
+      if (j.eyelidR) j.eyelidR.rotation.y = ibRotY;
+      const lowerOpen = Math.PI * 0.75;
+      const ibLt = Math.min(ibMapped * 1.5, 1) * 0.3;
+      const ibLowerRotY = lowerOpen + (lowerOpen * 0 - lowerOpen) * ibLt;
+      if (j.eyelidLowerL) j.eyelidLowerL.rotation.y = ibLowerRotY;
+      if (j.eyelidLowerR) j.eyelidLowerR.rotation.y = ibLowerRotY;
+
+      // Head looks toward table/chair during walk, then forward
+      if (ad.state === WSTATE.WALKING) {
+        // Look slightly toward where they're walking (-X direction = forward)
+        j.head.rotation.x = 0.05; // slight downward look
+        j.head.rotation.y = -Math.sin(m.walkPhase) * 0.03; // subtle walk sway
+      } else if (ad.state === WSTATE.PULLING_CHAIR || ad.state === WSTATE.SIDESTEPPING) {
+        // Look down at chair
+        j.head.rotation.x = 0.15;
+      } else if (ad.state === WSTATE.SITTING) {
+        // Look forward as they sit
+        j.head.rotation.x = 0.05;
+      }
+
+      // Pupils look in walking direction
+      const headR_intro = 42;
+      const pupBaseY = headR_intro * 0.28, pupBaseZ = headR_intro * 0.15;
+      const lookAheadY = (ad.state === WSTATE.WALKING) ? -0.02 * headR_intro : 0;
+      if (j.pupilL) j.pupilL.position.set(headR_intro * 0.97, pupBaseY + lookAheadY, pupBaseZ);
+      if (j.pupilR) j.pupilR.position.set(headR_intro * 0.97, -pupBaseY + lookAheadY, pupBaseZ);
 
       switch (ad.state) {
         case WSTATE.WAITING: {

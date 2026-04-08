@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>Expression Picker — TX42</title>
+<style>
+  body { margin:0; background:#222; color:#ddd; font-family:monospace; display:flex; flex-direction:column; align-items:center; height:100vh; overflow:hidden; }
+  #viewport { width:100%; flex:1; }
+  #hud { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); text-align:center; }
+  #exprName { font-size:22px; color:#ff0; margin-bottom:8px; }
+  #counter { font-size:12px; color:#888; margin-bottom:6px; }
+  .nav { display:flex; gap:8px; justify-content:center; align-items:center; margin-bottom:8px; }
+  button { background:#333; color:#ddd; border:1px solid #555; padding:6px 16px; cursor:pointer; border-radius:3px; font-family:monospace; font-size:14px; }
+  button:hover { background:#555; }
+  button.big { font-size:20px; padding:8px 20px; }
+  button.up { background:#1a3a1a; border-color:#0a0; font-size:18px; }
+  button.up.active { background:#0a4a0a; color:#0f0; border-color:#0f0; }
+  button.down { background:#3a1a1a; border-color:#a00; font-size:18px; }
+  button.down.active { background:#4a0a0a; color:#f00; border-color:#f00; }
+  button.edit { background:#2a2a1a; border-color:#aa0; font-size:14px; }
+  #editPanel { display:none; position:absolute; bottom:140px; left:50%; transform:translateX(-50%); background:#1a1a1a; border:1px solid #555; border-radius:6px; padding:10px; min-width:280px; }
+  #editPanel .row { display:flex; align-items:center; margin:4px 0; }
+  #editPanel label { width:70px; font-size:12px; }
+  #editPanel input[type=range] { flex:1; margin:0 6px; }
+  #editPanel .val { width:40px; text-align:right; color:#8f8; font-size:11px; }
+  #editPanel input[type=text] { background:#333; color:#ddd; border:1px solid #555; padding:3px 6px; font-family:monospace; font-size:12px; width:160px; }
+  #output { position:absolute; top:10px; right:10px; background:#000; color:#0f0; font-size:10px; padding:6px; max-width:300px; white-space:pre-wrap; border:1px solid #333; border-radius:3px; display:none; }
+</style>
+</head><body>
+<div id="viewport"></div>
+<div id="hud">
+  <div id="exprName">Big Smile</div>
+  <div id="counter">1 / 30</div>
+  <div class="nav">
+    <button class="big" onclick="prev()">&#9664;</button>
+    <button class="up" id="upBtn" onclick="thumbsUp()">&#128077;</button>
+    <button class="down" id="downBtn" onclick="thumbsDown()">&#128078;</button>
+    <button class="edit" id="editBtn" onclick="toggleEdit()">&#9998; Edit</button>
+    <button class="big" onclick="next()">&#9654;</button>
+  </div>
+  <button onclick="copyKept()">Copy Kept Expressions</button>
+</div>
+<div id="editPanel">
+  <div class="row"><label>Name</label><input type="text" id="edName"></div>
+  <div class="row"><label>Blink</label><input type="range" id="edBlink" min="0" max="1" step="0.01"><span class="val" id="edBlinkV"></span></div>
+  <div class="row"><label>Mood</label><input type="range" id="edMood" min="-1" max="1" step="0.05"><span class="val" id="edMoodV"></span></div>
+  <div class="row"><label>Pupil Y</label><input type="range" id="edPupY" min="-0.12" max="0.12" step="0.01"><span class="val" id="edPupYV"></span></div>
+  <div class="row"><label>Pupil Z</label><input type="range" id="edPupZ" min="-0.08" max="0.08" step="0.01"><span class="val" id="edPupZV"></span></div>
+  <div style="margin-top:6px;text-align:center;"><button onclick="applyEdit()">Apply</button></div>
+</div>
+<div id="output"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+
+const expressions = [
+  { name: "Big Smile",       blink: 0.05, mood: 1.0,  pupY: 0 },
+  { name: "Happy",           blink: 0.08, mood: 0.7,  pupY: 0 },
+  { name: "Content",         blink: 0.12, mood: 0.4,  pupY: 0 },
+  { name: "Pleased",         blink: 0.20, mood: 0.5,  pupY: 0 },
+  { name: "Smirk",           blink: 0.10, mood: 0.3,  pupY: 0.03 },
+  { name: "Neutral",         blink: 0.10, mood: 0.0,  pupY: 0 },
+  { name: "Relaxed",         blink: 0.18, mood: 0.1,  pupY: 0 },
+  { name: "Bored",           blink: 0.30, mood: 0.0,  pupY: -0.02 },
+  { name: "Deadpan",         blink: 0.12, mood: 0.0,  pupY: 0 },
+  { name: "Blank Stare",     blink: 0.05, mood: 0.0,  pupY: 0 },
+  { name: "Thinking",        blink: 0.15, mood: 0.1,  pupY: 0.06 },
+  { name: "Looking Left",    blink: 0.10, mood: 0.0,  pupY: 0.08 },
+  { name: "Looking Right",   blink: 0.10, mood: 0.0,  pupY: -0.08 },
+  { name: "Looking Up",      blink: 0.08, mood: 0.05, pupZ: 0.06 },
+  { name: "Side-Eye",        blink: 0.15, mood: 0.15, pupY: 0.10 },
+  { name: "Drowsy",          blink: 0.55, mood: 0.0,  pupY: 0 },
+  { name: "Sleepy",          blink: 0.70, mood: -0.1, pupY: 0 },
+  { name: "Half Asleep",     blink: 0.80, mood: -0.2, pupY: 0.02 },
+  { name: "Eyes Closed",     blink: 1.0,  mood: 0.0,  pupY: 0 },
+  { name: "Peaceful Sleep",  blink: 1.0,  mood: 0.2,  pupY: 0 },
+  { name: "Slight Frown",    blink: 0.12, mood: -0.3, pupY: 0 },
+  { name: "Sad",             blink: 0.18, mood: -0.6, pupY: -0.02 },
+  { name: "Very Sad",        blink: 0.25, mood: -1.0, pupY: 0 },
+  { name: "Disappointed",    blink: 0.20, mood: -0.5, pupY: -0.03 },
+  { name: "Grumpy",          blink: 0.22, mood: -0.4, pupY: 0 },
+  { name: "Surprised",       blink: 0.0,  mood: 0.0,  pupY: 0 },
+  { name: "Shocked",         blink: 0.0,  mood: -0.3, pupY: 0 },
+  { name: "Suspicious",      blink: 0.30, mood: -0.1, pupY: 0.05 },
+  { name: "Wink",            blink: 0.10, mood: 0.4,  pupY: 0, winkL: true },
+  { name: "Scheming",        blink: 0.20, mood: 0.5,  pupY: 0.06 },
+];
+
+const F = { eyeX:0.81, eyeY:0.28, eyeZ:0.15, eyeSize:0.22, pupX:0.97, pupSize:0.08,
+  noseX:1.08, noseZ:-0.05, noseR:0.10, noseLen:0.25,
+  mouthX:0.92, mouthZ:-0.30, mouthR:0.15 };
+const headR = 42;
+const skinColor = 0xc68642;
+
+// Track kept/skipped
+const status = new Array(expressions.length).fill(null); // null=undecided, 'keep', 'skip'
+let current = 0;
+
+// Scene setup
+const container = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x444455);
+const w = window.innerWidth, h = window.innerHeight;
+const cam = new THREE.PerspectiveCamera(30, w / h, 1, 500);
+cam.up.set(0, 0, 1);
+cam.position.set(150, 40, 10);
+cam.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(w, h);
+container.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x777777));
+const dl = new THREE.DirectionalLight(0xffffff, 0.7);
+dl.position.set(100, 60, 80); scene.add(dl);
+const dl2 = new THREE.DirectionalLight(0xffffff, 0.3);
+dl2.position.set(-50, -40, 60); scene.add(dl2);
+
+let headGroup = null;
+
+function createEyelid(eyeR, skinMat) {
+  const r = eyeR * 1.12;
+  const geo = new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  geo.rotateZ(-Math.PI / 2);
+  const mat = skinMat.clone();
+  mat.side = THREE.FrontSide;
+  return new THREE.Mesh(geo, mat);
+}
+
+function buildExpression(expr) {
+  if (headGroup) scene.remove(headGroup);
+  headGroup = new THREE.Group();
+  scene.add(headGroup);
+
+  const skinMat = new THREE.MeshPhongMaterial({ color: skinColor, shininess: 25 });
+  const eyeWhiteMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 60 });
+  const pupilMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 80 });
+
+  // Head
+  headGroup.add(new THREE.Mesh(new THREE.SphereGeometry(headR, 20, 16), skinMat));
+
+  const pupYOff = expr.pupY || 0;
+  const pupZOff = expr.pupZ || 0;
+
+  for (const side of [-1, 1]) {
+    const ex = headR * F.eyeX, ey = side * headR * F.eyeY, ez = headR * F.eyeZ;
+    const eyeR = headR * F.eyeSize;
+
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 12, 12), eyeWhiteMat);
+    eye.position.set(ex, ey, ez);
+    headGroup.add(eye);
+
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(headR * F.pupSize, 10, 10), pupilMat);
+    pupil.position.set(headR * F.pupX, ey + headR * pupYOff, ez + headR * pupZOff);
+    headGroup.add(pupil);
+
+    // Upper eyelid
+    const lidR = eyeR * 1.12;
+    const upperPivot = new THREE.Group();
+    upperPivot.position.set(ex, ey, ez);
+    headGroup.add(upperPivot);
+    upperPivot.add(createEyelid(eyeR, skinMat));
+
+    // Lower eyelid
+    const lowerPivot = new THREE.Group();
+    lowerPivot.position.set(ex, ey, ez);
+    headGroup.add(lowerPivot);
+    lowerPivot.add(createEyelid(eyeR, skinMat));
+
+    // Apply blink
+    let t = expr.blink;
+    if (expr.winkL && side === 1) t = 1.0;
+    const mapped = 0.25 + t * 0.29;
+
+    const upperOpen = -Math.PI * 0.92, upperClosed = 0.0;
+    upperPivot.rotation.y = upperOpen + (upperClosed - upperOpen) * mapped;
+
+    const lowerOpen = Math.PI * 0.75, lowerClosed = 0.0;
+    const lt = Math.min(mapped * 1.5, 1) * 0.3;
+    lowerPivot.rotation.y = lowerOpen + (lowerClosed - lowerOpen) * lt;
+  }
+
+  // Nose
+  const noseG = new THREE.ConeGeometry(headR * F.noseR, headR * F.noseLen, 6);
+  noseG.rotateZ(-Math.PI / 2);
+  const noseM = new THREE.Mesh(noseG, skinMat);
+  noseM.position.set(headR * F.noseX, 0, headR * F.noseZ);
+  headGroup.add(noseM);
+
+  // Mouth
+  const mWidth = headR * F.mouthR;
+  const sag = mWidth * 1.0 * expr.mood;
+  const tubeR = headR * 0.018;
+  const curve = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(-mWidth, 0, 0),
+    new THREE.Vector3(0, -sag, 0),
+    new THREE.Vector3(mWidth, 0, 0)
+  );
+  const mouthG = new THREE.TubeGeometry(curve, 16, tubeR, 6, false);
+  const mouthM = new THREE.Mesh(mouthG, new THREE.MeshBasicMaterial({ color: 0x000000 }));
+  const mVec = new THREE.Vector3(F.mouthX, 0, F.mouthZ).normalize().multiplyScalar(headR * 1.01);
+  mouthM.position.copy(mVec);
+  mouthM.lookAt(mVec.clone().multiplyScalar(2));
+  mouthM.rotateZ(Math.PI / 2);
+  headGroup.add(mouthM);
+}
+
+function updateHUD() {
+  const expr = expressions[current];
+  document.getElementById('exprName').textContent = expr.name;
+  document.getElementById('counter').textContent = `${current + 1} / ${expressions.length}`;
+  document.getElementById('upBtn').classList.toggle('active', status[current] === 'keep');
+  document.getElementById('downBtn').classList.toggle('active', status[current] === 'skip');
+}
+
+function show(idx) {
+  current = idx;
+  buildExpression(expressions[current]);
+  updateHUD();
+  if (editOpen) loadEdit();
+}
+
+function next() { show((current + 1) % expressions.length); }
+function prev() { show((current - 1 + expressions.length) % expressions.length); }
+
+function thumbsUp() {
+  status[current] = status[current] === 'keep' ? null : 'keep';
+  updateHUD();
+}
+function thumbsDown() {
+  status[current] = status[current] === 'skip' ? null : 'skip';
+  updateHUD();
+}
+
+let editOpen = false;
+function toggleEdit() {
+  editOpen = !editOpen;
+  const panel = document.getElementById('editPanel');
+  panel.style.display = editOpen ? 'block' : 'none';
+  if (editOpen) loadEdit();
+}
+function loadEdit() {
+  const e = expressions[current];
+  document.getElementById('edName').value = e.name;
+  document.getElementById('edBlink').value = e.blink;
+  document.getElementById('edBlinkV').textContent = e.blink.toFixed(2);
+  document.getElementById('edMood').value = e.mood;
+  document.getElementById('edMoodV').textContent = e.mood.toFixed(2);
+  document.getElementById('edPupY').value = e.pupY || 0;
+  document.getElementById('edPupYV').textContent = (e.pupY || 0).toFixed(2);
+  document.getElementById('edPupZ').value = e.pupZ || 0;
+  document.getElementById('edPupZV').textContent = (e.pupZ || 0).toFixed(2);
+}
+function applyEdit() {
+  const e = expressions[current];
+  e.name = document.getElementById('edName').value;
+  e.blink = parseFloat(document.getElementById('edBlink').value);
+  e.mood = parseFloat(document.getElementById('edMood').value);
+  e.pupY = parseFloat(document.getElementById('edPupY').value);
+  e.pupZ = parseFloat(document.getElementById('edPupZ').value);
+  show(current);
+}
+// Live preview while dragging sliders
+for (const id of ['edBlink','edMood','edPupY','edPupZ']) {
+  document.getElementById(id).addEventListener('input', function() {
+    document.getElementById(id + 'V').textContent = parseFloat(this.value).toFixed(2);
+    applyEdit();
+  });
+}
+
+function copyKept() {
+  const kept = [];
+  for (let i = 0; i < expressions.length; i++) {
+    if (status[i] === 'keep') kept.push(expressions[i]);
+  }
+  if (kept.length === 0) { alert('No expressions marked as Keep.'); return; }
+  const lines = kept.map(e => {
+    let s = `  { name: "${e.name}", blink: ${e.blink}, mood: ${e.mood}`;
+    if (e.pupY) s += `, pupY: ${e.pupY}`;
+    if (e.pupZ) s += `, pupZ: ${e.pupZ}`;
+    if (e.winkL) s += `, winkL: true`;
+    return s + ' }';
+  });
+  const code = `const EXPRESSIONS = [\n${lines.join(',\n')}\n];`;
+  const out = document.getElementById('output');
+  navigator.clipboard.writeText(code).then(() => {
+    out.style.display = 'block'; out.textContent = 'Copied!\n' + code;
+  }).catch(() => { out.style.display = 'block'; out.textContent = code; });
+}
+
+// Keyboard nav
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight' || e.key === 'd') next();
+  else if (e.key === 'ArrowLeft' || e.key === 'a') prev();
+  else if (e.key === 'k' || e.key === 'Enter') { thumbsUp(); next(); }
+  else if (e.key === 's' || e.key === 'Backspace') { thumbsDown(); next(); }
+  else if (e.key === 'e') toggleEdit();
+});
+
+// Orbit drag
+let isDrag = false, pX = 0, pY = 0, theta = 0, phi = -0.02, dist = 155;
+renderer.domElement.addEventListener('mousedown', e => { isDrag = true; pX = e.clientX; pY = e.clientY; });
+window.addEventListener('mouseup', () => isDrag = false);
+window.addEventListener('mousemove', e => {
+  if (!isDrag) return;
+  theta -= (e.clientX - pX) * 0.008;
+  phi = Math.max(-1.2, Math.min(1.2, phi + (e.clientY - pY) * 0.008));
+  pX = e.clientX; pY = e.clientY;
+});
+renderer.domElement.addEventListener('wheel', e => { dist = Math.max(60, Math.min(250, dist + e.deltaY * 0.1)); e.preventDefault(); }, { passive: false });
+
+window.addEventListener('resize', () => {
+  cam.aspect = window.innerWidth / window.innerHeight;
+  cam.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Render loop
+function animate() {
+  requestAnimationFrame(animate);
+  cam.position.set(
+    dist * Math.cos(phi) * Math.cos(theta),
+    dist * Math.cos(phi) * Math.sin(theta),
+    dist * Math.sin(phi)
+  );
+  cam.lookAt(0, 0, 0);
+  renderer.render(scene, cam);
+}
+
+show(0);
+animate();
+
+</script>
+</body></html>
