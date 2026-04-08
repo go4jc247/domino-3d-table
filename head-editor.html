@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Head Editor — TX42</title>
+<style>
+  body { margin:0; background:#222; color:#ddd; font-family:monospace; display:flex; height:100vh; overflow:hidden; }
+  #viewport { flex:1; }
+  #panel { width:320px; overflow-y:auto; background:#1a1a1a; padding:10px; font-size:12px; border-left:1px solid #444; }
+  .section { margin-bottom:10px; border:1px solid #444; padding:8px; border-radius:4px; }
+  .section h3 { margin:0 0 6px; font-size:13px; color:#ff0; }
+  .row { display:flex; align-items:center; margin:3px 0; }
+  .row label { width:80px; flex-shrink:0; }
+  .row input[type=range] { flex:1; margin:0 6px; }
+  .row .val { width:42px; text-align:right; color:#8f8; font-size:11px; }
+  button { background:#333; color:#ddd; border:1px solid #555; padding:4px 10px; cursor:pointer; border-radius:3px; margin:2px; font-family:monospace; }
+  button:hover { background:#555; }
+  #output { background:#000; color:#0f0; font-size:10px; padding:6px; margin-top:8px; white-space:pre-wrap; word-break:break-all; max-height:150px; overflow-y:auto; border:1px solid #333; border-radius:3px; }
+  .charBtn { display:inline-block; padding:4px 8px; margin:2px; cursor:pointer; border:1px solid #555; border-radius:3px; }
+  .charBtn.active { background:#553; border-color:#ff0; color:#ff0; }
+</style>
+</head><body>
+<div id="viewport"></div>
+<div id="panel">
+  <h2 style="margin:0 0 8px;color:#ff0;">Head Editor</h2>
+  <div style="margin-bottom:8px;">
+    Char:
+    <span class="charBtn active" onclick="switchChar(0)">0</span>
+    <span class="charBtn" onclick="switchChar(1)">1</span>
+    <span class="charBtn" onclick="switchChar(2)">2</span>
+    <span class="charBtn" onclick="switchChar(3)">3</span>
+    <span class="charBtn" onclick="switchChar(4)">4</span>
+    <span class="charBtn" onclick="switchChar(5)">5</span>
+  </div>
+
+  <div class="section"><h3>Eyes</h3>
+    <div class="row"><label>Fwd (X)</label><input type="range" id="eyeX" min="0.7" max="1.15" step="0.01" value="0.81"><span class="val" id="eyeXv">0.81</span></div>
+    <div class="row"><label>Spread (Y)</label><input type="range" id="eyeY" min="0.1" max="0.6" step="0.01" value="0.28"><span class="val" id="eyeYv">0.28</span></div>
+    <div class="row"><label>Height (Z)</label><input type="range" id="eyeZ" min="-0.3" max="0.5" step="0.01" value="0.15"><span class="val" id="eyeZv">0.15</span></div>
+    <div class="row"><label>Size</label><input type="range" id="eyeSize" min="0.08" max="0.35" step="0.01" value="0.22"><span class="val" id="eyeSizev">0.22</span></div>
+  </div>
+
+  <div class="section"><h3>Pupils</h3>
+    <div class="row"><label>Fwd (X)</label><input type="range" id="pupX" min="0.8" max="1.3" step="0.01" value="0.97"><span class="val" id="pupXv">0.97</span></div>
+    <div class="row"><label>Size</label><input type="range" id="pupSize" min="0.04" max="0.2" step="0.01" value="0.08"><span class="val" id="pupSizev">0.08</span></div>
+  </div>
+
+  <div class="section"><h3>Eyelids</h3>
+    <div class="row"><label>Width</label><input type="range" id="lidWidth" min="0.5" max="2.0" step="0.05" value="0.60"><span class="val" id="lidWidthv">0.60</span></div>
+    <div class="row"><label>Height</label><input type="range" id="lidHeight" min="0.3" max="1.5" step="0.05" value="0.35"><span class="val" id="lidHeightv">0.35</span></div>
+    <div class="row"><label>Curve</label><input type="range" id="lidCurve" min="0.0" max="1.0" step="0.05" value="0.15"><span class="val" id="lidCurvev">0.15</span></div>
+    <div class="row"><label>Fwd Offset</label><input type="range" id="lidFwd" min="-0.5" max="1.0" step="0.05" value="0.65"><span class="val" id="lidFwdv">0.65</span></div>
+    <div class="row"><label>Blink</label><input type="range" id="lidClose" min="0" max="1" step="0.01" value="0.10"><span class="val" id="lidClosev">0.10</span></div>
+  </div>
+
+  <div class="section"><h3>Nose</h3>
+    <div class="row"><label>Fwd (X)</label><input type="range" id="noseX" min="0.8" max="1.3" step="0.01" value="1.08"><span class="val" id="noseXv">1.08</span></div>
+
+    <div class="row"><label>Height (Z)</label><input type="range" id="noseZ" min="-0.4" max="0.3" step="0.01" value="-0.05"><span class="val" id="noseZv">-0.05</span></div>
+    <div class="row"><label>Radius</label><input type="range" id="noseR" min="0.04" max="0.25" step="0.01" value="0.10"><span class="val" id="noseRv">0.10</span></div>
+    <div class="row"><label>Length</label><input type="range" id="noseLen" min="0.1" max="0.5" step="0.01" value="0.25"><span class="val" id="noseLenv">0.25</span></div>
+  </div>
+
+  <div class="section"><h3>Mouth</h3>
+    <div class="row"><label>Fwd (X)</label><input type="range" id="mouthX" min="0.7" max="1.15" step="0.01" value="0.92"><span class="val" id="mouthXv">0.92</span></div>
+    <div class="row"><label>Height (Z)</label><input type="range" id="mouthZ" min="-0.6" max="0.1" step="0.01" value="-0.30"><span class="val" id="mouthZv">-0.30</span></div>
+    <div class="row"><label>Width</label><input type="range" id="mouthR" min="0.05" max="0.3" step="0.01" value="0.15"><span class="val" id="mouthRv">0.15</span></div>
+    <div class="row"><label>Mood</label><input type="range" id="mouthMood" min="-1" max="1" step="0.05" value="0.3"><span class="val" id="mouthMoodv">0.30</span></div>
+  </div>
+
+  <div class="section"><h3>Head</h3>
+    <div class="row"><label>Radius</label><input type="range" id="headRadius" min="25" max="60" step="1" value="42"><span class="val" id="headRadiusv">42</span></div>
+  </div>
+
+  <div style="margin-top:8px;">
+    <button onclick="copyCode()">Copy Code</button>
+    <button onclick="resetAll()">Reset</button>
+    <button onclick="testBlink()">Blink</button>
+    <button onclick="loopBlink()">Loop</button>
+  </div>
+  <div id="output">Adjust sliders, then "Copy Code" to get values.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const skinTones = [0xc68642, 0xe0ac69, 0xa0522d, 0xdeb887, 0x8d5524, 0xf1c27d];
+const hairColors = [0x2c1608, 0x4a3728, 0x1a1a1a, 0x3b2f2f, 0x2c1608, 0x8b7355];
+const hairStyleNames = ['cowboy', 'rancher', 'trucker', 'slick', 'buzzcut', 'straw'];
+
+let currentChar = 0, headR = 42;
+
+const container = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x333333);
+const camW = container.clientWidth || 600, camH = container.clientHeight || 600;
+const cam = new THREE.PerspectiveCamera(40, camW / camH, 1, 2000);
+cam.up.set(0, 0, 1);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(camW, camH);
+container.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x777777));
+const dl = new THREE.DirectionalLight(0xffffff, 0.7);
+dl.position.set(100, 60, 80); scene.add(dl);
+const dl2 = new THREE.DirectionalLight(0xffffff, 0.3);
+dl2.position.set(-50, -40, 60); scene.add(dl2);
+
+let headGroup, parts = {};
+
+// === EYELID: PERFECT HALF SPHERE ===
+// Each lid is a clean hemisphere slightly larger than the eyeball.
+// Pivot at TOP of eye (upper) or BOTTOM (lower). The hemisphere is offset
+// so its center sits at the eye center when closed, hanging from the pivot.
+function createEyelid(eyeR, skinMat) {
+  const r = eyeR * 1.12;
+  const geo = new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  // Rotate so dome pole faces +X (forward). Flat face = YZ plane.
+  geo.rotateZ(-Math.PI / 2);
+
+  const mat = skinMat.clone();
+  mat.side = THREE.FrontSide;
+  return new THREE.Mesh(geo, mat);
+}
+
+function buildHead() {
+  if (headGroup) scene.remove(headGroup);
+  headGroup = new THREE.Group();
+  scene.add(headGroup);
+
+  const ci = currentChar;
+  const skinMat = new THREE.MeshPhongMaterial({ color: skinTones[ci], shininess: 25 });
+  const eyeWhiteMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 60 });
+  const pupilMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 80 });
+  const lipMat = new THREE.MeshPhongMaterial({ color: 0xcc4444, shininess: 20 });
+
+  headR = parseFloat(document.getElementById('headRadius').value);
+
+  // Head sphere
+  headGroup.add(new THREE.Mesh(new THREE.SphereGeometry(headR, 20, 16), skinMat));
+  // Wireframe
+  const wireMat = new THREE.MeshBasicMaterial({ color: 0x555555, wireframe: true, transparent: true, opacity: 0.1 });
+  headGroup.add(new THREE.Mesh(new THREE.SphereGeometry(headR * 1.002, 20, 16), wireMat));
+
+  const eyeX = v('eyeX'), eyeY = v('eyeY'), eyeZ = v('eyeZ'), eyeSize = v('eyeSize');
+  const pupX = v('pupX'), pupSize = v('pupSize');
+  const lidW = v('lidWidth'), lidH = v('lidHeight'), lidC = v('lidCurve'), lidFwd = v('lidFwd');
+
+  parts.upperPivots = []; parts.lowerPivots = [];
+
+  for (const side of [-1, 1]) {
+    const ex = headR * eyeX, ey = side * headR * eyeY, ez = headR * eyeZ;
+    const eyeR = headR * eyeSize;
+
+    // Eyeball
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 12, 12), eyeWhiteMat);
+    eye.position.set(ex, ey, ez);
+    headGroup.add(eye);
+
+    // Pupil
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(headR * pupSize, 10, 10), pupilMat);
+    pupil.position.set(headR * pupX, ey, ez);
+    headGroup.add(pupil);
+
+    // === UPPER EYELID ===
+    // Pivot at eye center. Hemisphere rotates around the eyeball.
+    const upperPivot = new THREE.Group();
+    upperPivot.position.set(ex, ey, ez);
+    headGroup.add(upperPivot);
+
+    const upperLid = createEyelid(eyeR, skinMat);
+    upperPivot.add(upperLid);
+    parts.upperPivots.push(upperPivot);
+
+    // === LOWER EYELID ===
+    const lowerPivot = new THREE.Group();
+    lowerPivot.position.set(ex, ey, ez);
+    headGroup.add(lowerPivot);
+
+    const lowerLid = createEyelid(eyeR, skinMat);
+    lowerPivot.add(lowerLid);
+    parts.lowerPivots.push(lowerPivot);
+  }
+
+  applyBlink(v('lidClose'));
+
+  // Nose
+  const noseG = new THREE.ConeGeometry(headR * v('noseR'), headR * v('noseLen'), 6);
+  noseG.rotateZ(-Math.PI / 2);
+  const noseM = new THREE.Mesh(noseG, skinMat);
+  noseM.position.set(headR * v('noseX'), 0, headR * v('noseZ'));
+  headGroup.add(noseM);
+
+  // Mouth — bezier curve on head sphere. Mood: -1=frown, 0=neutral, 1=smile
+  const mWidth = headR * v('mouthR');
+  const mood = v('mouthMood');
+  const sag = mWidth * 1.0 * mood;
+  const tubeR = headR * 0.018;
+  const curve = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(-mWidth, 0, 0),
+    new THREE.Vector3(0, -sag, 0),
+    new THREE.Vector3(mWidth, 0, 0)
+  );
+  const mouthG = new THREE.TubeGeometry(curve, 16, tubeR, 6, false);
+  const mouthMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const mouthM = new THREE.Mesh(mouthG, mouthMat);
+  const mVec = new THREE.Vector3(v('mouthX'), 0, v('mouthZ')).normalize().multiplyScalar(headR * 1.01);
+  mouthM.position.copy(mVec);
+  mouthM.lookAt(mVec.clone().multiplyScalar(2));
+  mouthM.rotateZ(Math.PI / 2); // rotate curve from vertical to horizontal
+  headGroup.add(mouthM);
+
+  // Hat
+  addHat(hairStyleNames[ci], skinMat);
+}
+
+function applyBlink(t) {
+  // t: 0=fully open, 1=fully closed
+  // Pivots are at top/bottom of eye. Hemispheres hang from hinge.
+  // Upper: rotates around eyeball. Negative = dome swept up/back. 0 = dome forward.
+  const upperOpen = -Math.PI * 0.92;  // fully behind head, eye completely clear
+  const upperClosed = 0.0;            // dome forward, covering eye
+
+  // Remap 0-1 slider to 0.25-0.54 internal range
+  const mapped = 0.25 + t * 0.29;
+
+  for (const p of parts.upperPivots || []) {
+    p.rotation.y = upperOpen + (upperClosed - upperOpen) * mapped;
+  }
+
+  // Lower: positive = dome swept down/back. 0 = dome forward.
+  const lowerOpen = Math.PI * 0.75;
+  const lowerClosed = 0.0;
+
+  for (const p of parts.lowerPivots || []) {
+    const lt = Math.min(mapped * 1.5, 1) * 0.3;
+    p.rotation.y = lowerOpen + (lowerClosed - lowerOpen) * lt;
+  }
+}
+
+function addHat(style, skinMat) {
+  const configs = {
+    cowboy:  { color: 0x5c3a1e, brimW: 2.0, crownH: 0.75, tilt: 0.0 },
+    rancher: { color: 0x1a1a1a, brimW: 1.85, crownH: 0.6, tilt: 0.1 },
+    trucker: { color: 0xc4a46a, brimW: 2.3, crownH: 0.65, tilt: 0.3 },
+    slick:   { color: 0x3a2510, brimW: 1.8, crownH: 0.8, tilt: 0.0 },
+    buzzcut: { color: 0x6a6a6a, brimW: 1.9, crownH: 0.65, tilt: 0.2 },
+    straw:   { color: 0xd4b86a, brimW: 2.4, crownH: 0.6, tilt: 0.35 },
+  };
+  const c = configs[style] || configs.cowboy;
+  const hatMat = new THREE.MeshPhongMaterial({ color: c.color, shininess: 20 });
+  const g = new THREE.Group();
+  g.rotation.y = -c.tilt;
+  headGroup.add(g);
+
+  const base = headR * 0.45;
+  const bG = new THREE.CylinderGeometry(headR * c.brimW, headR * c.brimW, headR * 0.08, 24);
+  bG.rotateX(Math.PI / 2);
+  g.add(new THREE.Mesh(bG, hatMat)).position.z = base;
+
+  const wH = headR * c.crownH;
+  const cG = new THREE.CylinderGeometry(headR * 0.7, headR * 1.08, wH, 16);
+  cG.rotateX(Math.PI / 2);
+  g.add(new THREE.Mesh(cG, hatMat)).position.z = base + wH / 2;
+
+  const tG = new THREE.CylinderGeometry(headR * 0.7, headR * 0.7, headR * 0.06, 16);
+  tG.rotateX(Math.PI / 2);
+  g.add(new THREE.Mesh(tG, hatMat)).position.z = base + wH;
+}
+
+function v(id) { return parseFloat(document.getElementById(id).value); }
+
+document.querySelectorAll('input[type=range]').forEach(inp => {
+  inp.addEventListener('input', () => {
+    document.getElementById(inp.id + 'v').textContent = parseFloat(inp.value).toFixed(2);
+    if (inp.id === 'lidClose') { applyBlink(parseFloat(inp.value)); }
+    else { buildHead(); }
+  });
+});
+
+function switchChar(idx) {
+  currentChar = idx;
+  document.querySelectorAll('.charBtn').forEach((b, i) => b.classList.toggle('active', i === idx));
+  buildHead();
+}
+
+function resetAll() {
+  const d = { eyeX:0.81, eyeY:0.28, eyeZ:0.15, eyeSize:0.22, pupX:0.97, pupSize:0.08,
+    lidWidth:0.60, lidHeight:0.35, lidCurve:0.15, lidFwd:0.65, lidClose:0.10,
+    noseX:1.08, noseZ:-0.05, noseR:0.10, noseLen:0.25,
+    mouthX:0.92, mouthZ:-0.30, mouthR:0.15, mouthMood:0.30, headRadius:42 };
+  for (const [id, val] of Object.entries(d)) {
+    document.getElementById(id).value = val;
+    document.getElementById(id + 'v').textContent = parseFloat(val).toFixed(2);
+  }
+  buildHead();
+}
+
+function testBlink() {
+  const start = performance.now();
+  function step() {
+    const e = performance.now() - start;
+    let t;
+    if (e < 150) t = e / 150;
+    else if (e < 400) t = 1 - (e - 150) / 250;
+    else { applyBlink(0); document.getElementById('lidClose').value=0; document.getElementById('lidClosev').textContent='0.00'; return; }
+    applyBlink(t);
+    document.getElementById('lidClose').value = t;
+    document.getElementById('lidClosev').textContent = t.toFixed(2);
+    requestAnimationFrame(step);
+  }
+  step();
+}
+
+let blinkLoop = null;
+function loopBlink() {
+  if (blinkLoop) { clearInterval(blinkLoop); blinkLoop = null; return; }
+  testBlink();
+  blinkLoop = setInterval(testBlink, 2500 + Math.random() * 2000);
+}
+
+function copyCode() {
+  const code = `// Face params (from head-editor)
+const FACE = { eyeX:${v('eyeX').toFixed(2)}, eyeY:${v('eyeY').toFixed(2)}, eyeZ:${v('eyeZ').toFixed(2)}, eyeSize:${v('eyeSize').toFixed(2)}, pupX:${v('pupX').toFixed(2)}, pupSize:${v('pupSize').toFixed(2)}, lidW:${v('lidWidth').toFixed(2)}, lidH:${v('lidHeight').toFixed(2)}, lidC:${v('lidCurve').toFixed(2)}, lidFwd:${v('lidFwd').toFixed(2)}, blink:${v('lidClose').toFixed(2)}, noseX:${v('noseX').toFixed(2)}, noseZ:${v('noseZ').toFixed(2)}, noseR:${v('noseR').toFixed(2)}, noseLen:${v('noseLen').toFixed(2)}, mouthX:${v('mouthX').toFixed(2)}, mouthZ:${v('mouthZ').toFixed(2)}, mouthR:${v('mouthR').toFixed(2)}, mouthMood:${v('mouthMood').toFixed(2)} };`;
+  navigator.clipboard.writeText(code).then(() => {
+    document.getElementById('output').textContent = 'Copied!\n' + code;
+  }).catch(() => { document.getElementById('output').textContent = code; });
+}
+
+// Orbit
+let isDrag = false, pX = 0, pY = 0, theta = 0, phi = -0.05, dist = 90;
+renderer.domElement.addEventListener('mousedown', e => { isDrag = true; pX = e.clientX; pY = e.clientY; });
+window.addEventListener('mouseup', () => isDrag = false);
+window.addEventListener('mousemove', e => { if (!isDrag) return; theta -= (e.clientX-pX)*0.008; phi = Math.max(-1.2,Math.min(1.2,phi+(e.clientY-pY)*0.008)); pX=e.clientX; pY=e.clientY; });
+renderer.domElement.addEventListener('wheel', e => { dist = Math.max(40,Math.min(400,dist+e.deltaY*0.3)); e.preventDefault(); }, {passive:false});
+renderer.domElement.addEventListener('touchstart', e => { isDrag=true; pX=e.touches[0].clientX; pY=e.touches[0].clientY; });
+renderer.domElement.addEventListener('touchend', () => isDrag=false);
+renderer.domElement.addEventListener('touchmove', e => { if(!isDrag)return; theta-=(e.touches[0].clientX-pX)*0.008; phi=Math.max(-1.2,Math.min(1.2,phi+(e.touches[0].clientY-pY)*0.008)); pX=e.touches[0].clientX; pY=e.touches[0].clientY; e.preventDefault(); }, {passive:false});
+
+window.addEventListener('resize', () => { const w=container.clientWidth, h=container.clientHeight; cam.aspect=w/h; cam.updateProjectionMatrix(); renderer.setSize(w,h); });
+scene.add(new THREE.AxesHelper(50));
+
+buildHead();
+function animate() {
+  requestAnimationFrame(animate);
+  cam.position.set(Math.cos(theta)*Math.cos(phi)*dist, Math.sin(theta)*Math.cos(phi)*dist, Math.sin(phi)*dist);
+  cam.lookAt(0, 0, 5);
+  renderer.render(scene, cam);
+}
+animate();
+</script>
+</body></html>
