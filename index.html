@@ -53,6 +53,23 @@
 </div>
 <div id="crosshair" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;display:none;">+</div>
 <div id="ffBadge" onclick="toggleFF()" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#ff0;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;text-shadow:0 0 8px rgba(255,255,0,0.6);padding:8px 16px;-webkit-tap-highlight-color:transparent;">&#9654;&#9654; 10x</div>
+<div id="armPanel" style="display:none;position:fixed;bottom:60px;left:10px;font-family:monospace;font-size:13px;color:#ccc;background:rgba(0,0,0,0.7);padding:10px;border-radius:8px;z-index:10;-webkit-tap-highlight-color:transparent;">
+  <div style="margin-bottom:6px;color:#ff0;font-weight:bold;">Arm Tuning <span onclick="toggleArmPanel()" style="cursor:pointer;float:right;padding:0 6px;">✕</span></div>
+  <div style="display:flex;gap:6px;align-items:center;margin:4px 0;">
+    <span style="width:70px;">Shldr:</span>
+    <button onclick="adjArm('shoulder',-0.1)" style="font-size:16px;padding:2px 10px;">−</button>
+    <span id="shVal" style="width:40px;text-align:center;">0.85</span>
+    <button onclick="adjArm('shoulder',0.1)" style="font-size:16px;padding:2px 10px;">+</button>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin:4px 0;">
+    <span style="width:70px;">Elbow:</span>
+    <button onclick="adjArm('elbow',-0.1)" style="font-size:16px;padding:2px 10px;">−</button>
+    <span id="elVal" style="width:40px;text-align:center;">0.70</span>
+    <button onclick="adjArm('elbow',0.1)" style="font-size:16px;padding:2px 10px;">+</button>
+  </div>
+  <div style="margin-top:6px;font-size:11px;color:#999;">Adjusts all seated characters</div>
+</div>
+<button id="armBtn" onclick="toggleArmPanel()" style="display:none;position:fixed;bottom:60px;left:10px;font-family:monospace;font-size:12px;color:#ccc;background:rgba(0,0,0,0.6);border:1px solid #555;border-radius:6px;padding:6px 10px;cursor:pointer;z-index:10;-webkit-tap-highlight-color:transparent;">🦾 Arms</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ========== SCENE SETUP ==========
@@ -1199,6 +1216,35 @@ function toggleFF() {
   badge.style.color = introFF ? '#ff0' : '#aaa';
 }
 
+// Arm tuning panel
+let armPanelOpen = false;
+function toggleArmPanel() {
+  armPanelOpen = !armPanelOpen;
+  document.getElementById('armPanel').style.display = armPanelOpen ? 'block' : 'none';
+  document.getElementById('armBtn').style.display = armPanelOpen ? 'none' : 'block';
+}
+function adjArm(joint, delta) {
+  if (joint === 'shoulder') {
+    TABLE_ARM_POSE.shoulderL.y = Math.round((TABLE_ARM_POSE.shoulderL.y + delta) * 100) / 100;
+    TABLE_ARM_POSE.shoulderR.y = TABLE_ARM_POSE.shoulderL.y;
+    document.getElementById('shVal').textContent = TABLE_ARM_POSE.shoulderL.y.toFixed(2);
+  } else {
+    TABLE_ARM_POSE.elbowL.y = Math.round((TABLE_ARM_POSE.elbowL.y + delta) * 100) / 100;
+    TABLE_ARM_POSE.elbowR.y = TABLE_ARM_POSE.elbowL.y;
+    document.getElementById('elVal').textContent = TABLE_ARM_POSE.elbowL.y.toFixed(2);
+  }
+  // Apply to all seated mannequins immediately
+  for (let i = 0; i < 6; i++) {
+    if (seatAnimData[i] && seatAnimData[i].state === WSTATE.SEATED && seatMannequins[i]) {
+      const j = seatMannequins[i].joints;
+      j.shoulderL.rotation.y = TABLE_ARM_POSE.shoulderL.y;
+      j.shoulderR.rotation.y = TABLE_ARM_POSE.shoulderR.y;
+      j.elbowL.rotation.y = TABLE_ARM_POSE.elbowL.y;
+      j.elbowR.rotation.y = TABLE_ARM_POSE.elbowR.y;
+    }
+  }
+}
+
 // ========== STATION SETUP (Chairs + Animated Mannequins) ==========
 const chairDist = APOTHEM + 80 + 225;
 const seatStations = [];
@@ -2136,6 +2182,7 @@ function animate() {
       introMode = false;
       introFF = false;
       document.getElementById('ffBadge').style.display = 'none';
+      document.getElementById('armBtn').style.display = 'block';
       // Restore FPS camera at seated position
       const headWorldPos = new THREE.Vector3();
       fpM.joints.head.getWorldPosition(headWorldPos);
