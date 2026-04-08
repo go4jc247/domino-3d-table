@@ -1464,20 +1464,20 @@ const armAnims = [];
 // Arm pose keyframes (shoulder & elbow, x and y axes)
 const ARM_POSE = {
   table: {   // resting on table
-    shX: 0, shY: TABLE_ARM_POSE.shoulderR.y,
-    elX: 0, elY: TABLE_ARM_POSE.elbowR.y
+    shX: 0, shY: -0.35,
+    elX: 0, elY: -2.10
   },
   reach: {   // hand reaching down to rack
-    shX: 0.3, shY: TABLE_ARM_POSE.shoulderR.y + 0.6,
-    elX: 0,   elY: TABLE_ARM_POSE.elbowR.y + 1.2
+    shX: 0.50, shY: -0.35,
+    elX: -1.00, elY: -2.10
   },
   lift: {    // arm raised with domino
-    shX: 0.15, shY: TABLE_ARM_POSE.shoulderR.y - 0.3,
-    elX: 0,    elY: TABLE_ARM_POSE.elbowR.y + 0.4
+    shX: 0.75, shY: -0.35,
+    elX: -1.00, elY: -2.10
   },
   throw: {   // arm extended forward, releasing domino toward table center
-    shX: 0, shY: TABLE_ARM_POSE.shoulderR.y - 0.5,
-    elX: 0, elY: TABLE_ARM_POSE.elbowR.y + 0.8
+    shX: 0.40, shY: -0.15,
+    elX: -0.70, elY: -2.00
   }
 };
 
